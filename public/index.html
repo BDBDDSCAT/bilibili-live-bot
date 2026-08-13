@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>B站直播机器人</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css?v=20260809-takeover-1" />
+  </head>
+  <body>
+    <main class="workbench">
+      <header class="hero">
+        <div class="hero-heading">
+          <p class="eyebrow">直播间机器人</p>
+          <h1 id="roomHeading">直播间</h1>
+          <a id="roomLink" href="https://live.bilibili.com" target="_blank" rel="noreferrer">
+            正在读取直播间…
+          </a>
+        </div>
+
+        <div class="run-state" aria-live="polite">
+          <span id="statusDot" class="status-dot stopped" aria-hidden="true"></span>
+          <div>
+            <span>当前状态</span>
+            <strong id="statusText">已停止</strong>
+            <p id="statusDetail">点击登录按钮即可开始。</p>
+            <div class="ai-status-row">
+              <p id="aiStatus" class="ai-status" data-state="idle">AI：将在开始时自动启动</p>
+              <button id="restartAiButton" class="ai-retry-button" type="button" hidden>启动AI</button>
+            </div>
+          </div>
+        </div>
+
+        <form id="roomForm" class="room-switcher" novalidate>
+          <label for="roomInput">B站直播间链接</label>
+          <div class="room-switch-row">
+            <input
+              id="roomInput"
+              name="room"
+              type="text"
+              inputmode="url"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="粘贴 live.bilibili.com 链接或输入房间号"
+            />
+            <button id="switchRoomButton" type="submit">切换房间</button>
+          </div>
+          <p id="roomMessage" aria-live="polite">正在读取当前直播间…</p>
+        </form>
+
+        <div class="hero-actions">
+          <button id="startButton" class="start-button" type="button">打开B站并登录</button>
+          <button id="stopButton" class="stop-button" type="button" hidden>立即停止</button>
+        </div>
+
+        <p id="sendSummary" class="send-summary" hidden></p>
+      </header>
+
+      <section class="section" aria-labelledby="featuresTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">开播前看一眼</p>
+            <h2 id="featuresTitle">机器人要帮你做什么</h2>
+          </div>
+          <p id="featureMessage" class="section-note" aria-live="polite">点一下就能开或关。</p>
+        </div>
+
+        <div class="feature-list">
+          <label class="feature-row">
+            <span class="feature-copy"><strong>自动欢迎</strong><small>观众进房时自动打招呼</small></span>
+            <input type="checkbox" data-modules="welcome" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="feature-row">
+            <span class="feature-copy"><strong>自动点赞</strong><small>开播后按随机节奏自动点赞，到达当日上限后自动停</small></span>
+            <input type="checkbox" data-modules="autoLike" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="feature-row">
+            <span class="feature-copy"><strong>礼物、SC、上舰感谢</strong><small>收到支持就自动感谢</small></span>
+            <input type="checkbox" data-modules="giftThanks,guardBoard" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="feature-row">
+            <span class="feature-copy"><strong>弹幕 / AI 互动</strong><small>观众发言会自动互动，被艾特时优先回复</small></span>
+            <input type="checkbox" data-modules="ai" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="feature-row">
+            <span class="feature-copy"><strong>PK 情报</strong><small>自动整理比分和对手情况</small></span>
+            <input type="checkbox" data-modules="pk" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="feature-row">
+            <span class="feature-copy"><strong>主动发言</strong><small>开播后 Qwen 按随机节奏活跃气氛，观众发言时优先回复</small></span>
+            <input type="checkbox" data-modules="rotation" />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <button id="pointsButton" class="feature-help" type="button">
+            <span class="feature-copy"><strong>签到积分 / 商城</strong><small>观众发“签到”或“积分商城”即可使用</small></span>
+            <span class="feature-ready">查看用法</span>
+          </button>
+          <button id="gameButton" class="feature-help" type="button">
+            <span class="feature-copy"><strong>谁是卧底</strong><small>观众发“#卧底开始”也能开局</small></span>
+            <span id="gameState" class="feature-ready">等待开局</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="obsTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">OBS 直播画面</p>
+            <h2 id="obsTitle">礼物展示源</h2>
+          </div>
+          <p class="section-note">浏览器源可以继续用，也可一键生成透明素材挂到直播画面。</p>
+        </div>
+
+        <div class="obs-source-grid">
+          <article class="obs-source-card">
+            <span class="obs-source-tag">无滚动动画</span>
+            <h3>静态礼物牌</h3>
+            <p>展示最新一份礼物和今日总价值，适合放在画面角落。</p>
+            <div class="obs-source-actions">
+              <a href="./gifts-static.html" target="_blank" rel="noreferrer">打开预览</a>
+              <button type="button" data-copy-overlay="/gifts-static.html">复制静态版地址</button>
+              <button class="overlay-generate-button" type="button" data-generate-overlay="png" data-overlay-mode="static">生成透明PNG</button>
+            </div>
+          </article>
+
+          <article class="obs-source-card">
+            <span class="obs-source-tag">横向连续滚动</span>
+            <h3>礼物滚动条</h3>
+            <p>循环滚动最新礼物，适合放在画面顶部或底部。</p>
+            <div class="obs-source-actions">
+              <a href="./gifts-scroll.html" target="_blank" rel="noreferrer">打开预览</a>
+              <button type="button" data-copy-overlay="/gifts-scroll.html">复制滚动版地址</button>
+              <button class="overlay-generate-button" type="button" data-generate-overlay="gif" data-overlay-mode="scroll">生成透明GIF</button>
+            </div>
+          </article>
+        </div>
+        <p id="overlayMessage" class="obs-copy-message" aria-live="polite">生成后会在下方直接出现下载按钮。</p>
+        <div id="overlayDownloads" class="overlay-downloads" aria-live="polite"></div>
+      </section>
+
+      <section class="section" aria-labelledby="roomNowTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">现在发生了什么</p>
+            <h2 id="roomNowTitle">直播间现况</h2>
+          </div>
+        </div>
+
+        <dl class="room-facts">
+          <div><dt>最近弹幕</dt><dd id="latestChat">还没有弹幕</dd></div>
+          <div><dt>机器人已回复</dt><dd id="replyCount">0 条</dd></div>
+          <div><dt>机器人已点赞</dt><dd id="likeCount">0 次</dd></div>
+          <div><dt>今日礼物</dt><dd id="giftToday">0</dd></div>
+          <div><dt>PK 比分</dt><dd id="pkScore">未开始</dd></div>
+          <div><dt>待处理兑换订单</dt><dd id="pendingOrders">0 个</dd></div>
+        </dl>
+      </section>
+
+      <details id="activityDetails" class="activity" hidden>
+        <summary>查看最近动态</summary>
+        <pre id="activityText"></pre>
+      </details>
+    </main>
+
+    <script src="./app.js?v=20260809-takeover-4"></script>
+  </body>
+</html>

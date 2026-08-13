@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OBS 礼物滚动条</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./gifts-overlay.css?v=20260808-1" />
+  </head>
+  <body class="overlay-page" data-overlay-mode="scroll">
+    <main class="scroll-overlay" aria-live="polite">
+      <div class="scroll-total">
+        <span>今日礼物</span>
+        <strong id="scrollGiftTotal">0电池</strong>
+        <small id="scrollGiftCount">0 份</small>
+      </div>
+      <div class="gift-marquee">
+        <div id="giftTrack" class="gift-marquee-track">
+          <div class="gift-marquee-empty">等待第一份礼物</div>
+        </div>
+      </div>
+      <p id="overlayStatus" class="visually-hidden">正在同步礼物</p>
+    </main>
+    <script src="./gifts-overlay.js?v=20260808-1"></script>
+  </body>
+</html>

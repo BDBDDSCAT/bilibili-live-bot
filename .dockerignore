@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.DS_Store
+.git
+.github
+.tmp
+.playwright-cli
+state
+artifacts
+screenshots
+coverage
+config.json
+config.local.json
+.env
+.env.*

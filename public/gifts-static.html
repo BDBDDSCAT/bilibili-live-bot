@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OBS 静态礼物展示</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./gifts-overlay.css?v=20260808-1" />
+  </head>
+  <body class="overlay-page" data-overlay-mode="static">
+    <main class="static-overlay" aria-live="polite">
+      <section class="static-gift-card">
+        <div class="latest-gift-heading">
+          <span class="overlay-kicker">最新礼物</span>
+          <div class="gift-person">
+            <span class="avatar-shell"><img id="giftFace" alt="" /></span>
+            <span class="gift-person-copy">
+              <strong id="giftUser">等待送礼</strong>
+              <small id="giftAction">礼物出现后会自动展示</small>
+            </span>
+          </div>
+        </div>
+
+        <div class="latest-gift-main">
+          <img id="giftIcon" class="latest-gift-icon" alt="" />
+          <span class="latest-gift-copy">
+            <strong id="giftName">还没有礼物</strong>
+            <small id="giftValue">—</small>
+          </span>
+          <span id="giftCount" class="gift-count"></span>
+        </div>
+
+        <div class="gift-total-card">
+          <span>今日礼物总价值</span>
+          <strong id="giftTotal">0电池</strong>
+          <small id="giftTotalCount">0 份</small>
+        </div>
+      </section>
+      <p id="overlayStatus" class="visually-hidden">正在同步礼物</p>
+    </main>
+    <script src="./gifts-overlay.js?v=20260808-1"></script>
+  </body>
+</html>

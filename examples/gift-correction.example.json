@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "day": "2030-01-02",
+  "roomId": 20002,
+  "source": "user_confirmed",
+  "note": "合成示例，不对应真实用户或直播间。",
+  "events": [
+    {
+      "id": "manual-example-gift-001",
+      "at": 1893542400000,
+      "userId": 900001,
+      "userName": "示例观众",
+      "giftId": 34003,
+      "giftName": "人气票",
+      "count": 1,
+      "evidence": "由使用者人工核对"
+    }
+  ]
+}

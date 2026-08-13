@@ -1,0 +1,15 @@
+# 仅监听模式：适合长期跑监听、统计、网页控制台和礼物挂件。
+# 自动发弹幕/点赞依赖宿主机 Chrome，容器里不可用，见 Dockerfile 顶部说明。
+services:
+  bili-live-bot:
+    build: .
+    ports:
+      - "127.0.0.1:4322:4322"
+    environment:
+      TZ: Asia/Tokyo
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config.json:/app/config.json
+      - ./state:/app/state
+    restart: unless-stopped

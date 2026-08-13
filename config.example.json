@@ -1,0 +1,467 @@
+{
+  "room": "",
+  "dryRun": true,
+  "speakEndpoint": "",
+  "send": {
+    "enabled": false,
+    "maxChars": 40,
+    "cooldownSec": 8
+  },
+  "showAllEvents": false,
+  "connection": {
+    "autoStartSafe": true,
+    "fanoutHosts": 1
+  },
+  "browserAutomation": {
+    "enabled": false,
+    "roomUrl": "",
+    "profileDir": "state/browser-profile",
+    "chromeExecutable": "",
+    "headless": false,
+    "loginPollMs": 1500,
+    "autoLike": {
+      "enabled": false,
+      "onlyWhenLive": true,
+      "initialDelayMinSec": 2,
+      "initialDelayMaxSec": 5,
+      "intervalMinSec": 0.85,
+      "intervalMaxSec": 1.15,
+      "burstMinClicks": 10,
+      "burstMaxClicks": 50,
+      "sessionTargetMinClicks": 10000,
+      "sessionTargetMaxClicks": 20000
+    }
+  },
+  "modules": {
+    "autoSend": {
+      "enabled": false
+    },
+    "autoLike": {
+      "enabled": false
+    },
+    "welcome": {
+      "enabled": true
+    },
+    "giftThanks": {
+      "enabled": true,
+      "minCoin": 0
+    },
+    "pk": {
+      "enabled": true
+    },
+    "rotation": {
+      "enabled": false
+    },
+    "ai": {
+      "enabled": false
+    },
+    "spam": {
+      "enabled": true
+    },
+    "guardBoard": {
+      "enabled": true
+    },
+    "history": {
+      "enabled": true
+    }
+  },
+  "roles": {
+    "anchorNames": [],
+    "anchorIds": [],
+    "adminNames": [],
+    "adminIds": [],
+    "botNames": [],
+    "assistantUids": []
+  },
+  "automation": {
+    "enabled": false,
+    "autoSendTypes": [
+      "reply",
+      "command_reply",
+      "gift_report",
+      "pk_report",
+      "pk_multi_report",
+      "pk_info",
+      "timer",
+      "spam"
+    ],
+    "pauseWelcomeDuringLottery": true,
+    "pauseGiftDuringLottery": true,
+    "queueLimit": 80,
+    "humanTiming": {
+      "enabled": false,
+      "actionDelayMinMs": 500,
+      "actionDelayMaxMs": 1800,
+      "sendGapMinSec": 2,
+      "sendGapMaxSec": 5
+    },
+    "startupMessage": {
+      "enabled": false,
+      "text": "机器人已上线，陪大家一起看直播～"
+    }
+  },
+  "localAi": {
+    "enabled": false,
+    "provider": "ollama",
+    "endpoint": "http://127.0.0.1:11434",
+    "model": "qwen3.5:4b",
+    "autoStart": true,
+    "startupTimeoutMs": 15000,
+    "localOnly": true,
+    "timeoutMs": 20000,
+    "numCtx": 8192,
+    "maxChars": 36,
+    "temperature": 0.4,
+    "think": false,
+    "numPredict": 80,
+    "keepAlive": "30m",
+    "viewerReplyCooldownMs": 1500,
+    "fallbackToRules": false,
+    "allViewerChats": true,
+    "proactive": {
+      "enabled": false,
+      "onlyWhenLive": true,
+      "initialMinSec": 45,
+      "initialMaxSec": 90,
+      "intervalMinSec": 90,
+      "intervalMaxSec": 180,
+      "silenceMinSec": 30
+    }
+  },
+  "weather": {
+    "enabled": true,
+    "timeoutMs": 7000,
+    "language": "zh"
+  },
+  "history": {
+    "enabled": true,
+    "dir": "state",
+    "restoreGiftStatsOnStart": true,
+    "persistKinds": [
+      "chat",
+      "enter",
+      "follow",
+      "share",
+      "gift",
+      "superChat",
+      "guard",
+      "like",
+      "online",
+      "onlineRank",
+      "watched",
+      "pk",
+      "notice",
+      "event",
+      "audit"
+    ],
+    "rawAudit": {
+      "enabled": true
+    }
+  },
+  "retention": {
+    "enabled": true,
+    "rawDays": 60,
+    "eventsDays": 180,
+    "logsDays": 14,
+    "auditsDays": 90,
+    "observationsDays": 30,
+    "overlaysKeep": 24
+  },
+  "screenshots": {
+    "enabled": false,
+    "dir": "screenshots",
+    "regions": [],
+    "triggers": {
+      "gift": {
+        "enabled": false,
+        "minCoin": 0,
+        "delayMs": 1200
+      },
+      "superChat": {
+        "enabled": false,
+        "minCoin": 0,
+        "delayMs": 1200
+      },
+      "guard": {
+        "enabled": false,
+        "minCoin": 0,
+        "delayMs": 1200
+      },
+      "manual": {
+        "enabled": false,
+        "delayMs": 0
+      }
+    }
+  },
+  "points": {
+    "enabled": true,
+    "signInPoints": 10,
+    "giftPointsPerBattery": 1,
+    "guardPoints": {
+      "1": 20000,
+      "2": 2000,
+      "3": 300
+    },
+    "signInStreak": {
+      "enabled": true,
+      "bonusPerDay": 2,
+      "maxBonus": 20,
+      "milestones": {
+        "7": 20,
+        "30": 100
+      }
+    },
+    "shopItems": [
+      {
+        "id": "song",
+        "name": "点歌一次",
+        "cost": 30,
+        "description": "主播方便时安排"
+      },
+      {
+        "id": "title",
+        "name": "弹幕称号",
+        "cost": 80,
+        "description": "主播人工确认后生效"
+      },
+      {
+        "id": "snapshot",
+        "name": "礼物长图点名",
+        "cost": 120,
+        "description": "生成礼物图时优先展示"
+      }
+    ]
+  },
+  "commands": {
+    "prefixes": [
+      "#",
+      "@"
+    ],
+    "allowPublicGiftQuery": true,
+    "allowPublicPkQuery": true,
+    "drawLots": [
+      "上上签，今天适合留在直播间。",
+      "吉签，好运在路上。",
+      "小吉签，弹幕多说两句会更顺。",
+      "平签，稳住就赢。",
+      "小凶签，今天少冲动，多喝水。"
+    ]
+  },
+  "rateLimit": {
+    "globalSendCooldownSec": 8,
+    "spamCooldownSec": 120
+  },
+  "ignoreUsers": [],
+  "ignoreNameIncludes": [
+    "小助理",
+    "助理",
+    "助手",
+    "机器人",
+    "管家"
+  ],
+  "maxRepliesPerMessage": 1,
+  "blocklist": [
+    "加微信",
+    "私信返利",
+    "刷单"
+  ],
+  "rules": [
+    {
+      "name": "greeting",
+      "enabled": true,
+      "priority": 50,
+      "keywords": [
+        "你好",
+        "晚上好",
+        "主播好",
+        "来了"
+      ],
+      "reply": "欢迎 {user}，先随便坐。",
+      "cooldownSec": 10,
+      "userCooldownSec": 60
+    },
+    {
+      "name": "deduction_one",
+      "enabled": true,
+      "priority": 70,
+      "matchMode": "exact",
+      "keywords": [
+        "1",
+        "11",
+        "111",
+        "扣1"
+      ],
+      "reply": [
+        "收到扣1，主播看得到~",
+        "扣1的好多，主播这波有排面。"
+      ],
+      "cooldownSec": 25,
+      "userCooldownSec": 60
+    },
+    {
+      "name": "six_reaction",
+      "enabled": true,
+      "priority": 60,
+      "matchMode": "exact",
+      "keywords": [
+        "6",
+        "66",
+        "666",
+        "6666"
+      ],
+      "reply": [
+        "这波确实 666。",
+        "收到 666，气氛起来了。"
+      ],
+      "cooldownSec": 30,
+      "userCooldownSec": 90
+    },
+    {
+      "name": "gift_report",
+      "enabled": true,
+      "priority": 120,
+      "keywords": [
+        "截图今日礼物",
+        "今日礼物",
+        "礼物截图"
+      ],
+      "action": "gift_report",
+      "reply": "",
+      "cooldownSec": 10,
+      "userCooldownSec": 20
+    },
+    {
+      "name": "pk_report",
+      "enabled": true,
+      "priority": 120,
+      "keywords": [
+        "pk情况",
+        "pk 情况",
+        "对面大哥",
+        "比分"
+      ],
+      "action": "pk_report",
+      "reply": "",
+      "cooldownSec": 5,
+      "userCooldownSec": 10
+    }
+  ],
+  "interactions": {
+    "ignoreUsers": [],
+    "ignoreNameIncludes": [
+      "小助理",
+      "助理",
+      "助手",
+      "机器人",
+      "管家"
+    ],
+    "welcome": {
+      "enabled": true,
+      "requireFullName": true,
+      "maskedResolveDelayMs": 5000,
+      "cooldownSec": 4,
+      "userCooldownSec": 300,
+      "guardIgnoresBlacklist": true,
+      "blacklist": [],
+      "blacklistIncludes": [],
+      "specificTemplates": {},
+      "guardTemplates": {
+        "舰长": "欢迎舰长『{user}』上船回家",
+        "提督": "欢迎提督『{user}』，排面拉满"
+      },
+      "idleReminderUserCooldownSec": 1800,
+      "idleRemindersRequireWelcome": true,
+      "idleReminders": [],
+      "highWealth": {
+        "enabled": false,
+        "minLevel": 20,
+        "templates": []
+      },
+      "timeBuckets": [],
+      "templates": [
+        "欢迎『{user}』来玩",
+        "欢迎{user}，今天也来啦",
+        "{user}来了，找个舒服的位置坐",
+        "欢迎{user}，有问题直接发弹幕"
+      ]
+    },
+    "gift": {
+      "enabled": true,
+      "cooldownSec": 3,
+      "userCooldownSec": 8,
+      "aggregateWindowMs": 3000,
+      "bigThanksMinCoin": 50000,
+      "dedupeFingerprintWindowMs": 300,
+      "minBattery": 0,
+      "blindTemplates": [
+        "感谢{user}投喂{sourceGiftName}，爆出{giftName}x{count}",
+        "{user}这发{sourceGiftName}开出{giftName}x{count}，已记账"
+      ],
+      "templates": [
+        "感谢{user}的{giftName}~",
+        "谢谢{user}投喂{giftName}x{count}",
+        "{user}的{giftName}收到啦，感谢支持"
+      ]
+    },
+    "superChat": {
+      "enabled": true,
+      "templates": [
+        "感谢{user}的醒目留言：{message}",
+        "{user}的SC收到，主播一定能看到"
+      ]
+    },
+    "guard": {
+      "enabled": true,
+      "templates": [
+        "感谢{user}上船，排面拉满",
+        "{user}的大航海收到，主播快看"
+      ]
+    },
+    "follow": {
+      "enabled": true,
+      "cooldownSec": 10,
+      "userCooldownSec": 600,
+      "templates": [
+        "感谢{user}的关注，欢迎常来玩",
+        "{user}关注收到，开播不迷路"
+      ]
+    },
+    "share": {
+      "enabled": true,
+      "cooldownSec": 15,
+      "userCooldownSec": 600,
+      "templates": [
+        "感谢{user}分享直播间",
+        "{user}帮忙分享啦，感谢支持"
+      ]
+    },
+    "live": {
+      "entryMsg": "",
+      "goodbyeInfo": ""
+    },
+    "moderation": {
+      "showBlockMsg": false,
+      "blockTemplate": "{user} 被禁言了，大家注意直播间秩序。",
+      "keywordAlert": true,
+      "keywordAlertTemplate": "{user} 的弹幕命中巡场词，建议房管确认。"
+    },
+    "like": {
+      "enabled": false,
+      "minCount": 20,
+      "cooldownSec": 45,
+      "templates": [
+        "谢谢{user}的点赞x{likeCount}",
+        "点赞收到，感谢{user}"
+      ]
+    }
+  },
+  "pk": {
+    "showRawEvents": false,
+    "minReportIntervalSec": 10,
+    "investigator": {
+      "enabled": true,
+      "cacheMs": 30000
+    }
+  },
+  "timers": []
+}

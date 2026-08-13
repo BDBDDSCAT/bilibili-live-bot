@@ -1,0 +1,43 @@
+{
+  "name": "bilibili-live-bot",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "本地运行的 B 站直播间机器人：监听弹幕/礼物/PK，浏览器托管自动发弹幕点赞，本地 Qwen AI 互动，礼物挂件与积分商城。",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/webServer.js",
+    "web": "node src/webServer.js",
+    "setup": "node scripts/setup.js",
+    "cli": "node src/index.js",
+    "smoke": "node src/index.js --exit-after 20",
+    "observe": "node scripts/observe-room.js",
+    "replay": "node scripts/replay-raw.js",
+    "verify": "node scripts/verify-regressions.js",
+    "audit": "node scripts/audit-features.js",
+    "check": "npm test && npm run verify && npm run public:audit",
+    "public:audit": "node scripts/audit-public-release.js",
+    "public:export": "node scripts/export-public-release.js",
+    "test": "node --test scripts/test-config-loader.js scripts/test-logger-retention.js scripts/test-browser-controller.js scripts/test-local-ai-client.js scripts/test-local-ai-service.js scripts/test-weather-context.js scripts/test-proactive-ai.js scripts/test-auto-like-budget-store.js scripts/test-room-persistence.js scripts/test-gift-corrections.js",
+    "test:browser-controller": "node --test scripts/test-browser-controller.js",
+    "test:local-ai": "node --test scripts/test-local-ai-client.js",
+    "test:local-ai-service": "node --test scripts/test-local-ai-service.js",
+    "test:weather": "node --test scripts/test-weather-context.js",
+    "test:proactive-ai": "node --test scripts/test-proactive-ai.js",
+    "service:install": "node scripts/service.js install",
+    "service:uninstall": "node scripts/service.js uninstall",
+    "service:status": "node scripts/service.js status",
+    "export:overlays": "node scripts/generate-overlay-assets.js",
+    "export:gifts-long": "node scripts/generate-gift-long-image.js",
+    "correct:gifts": "node scripts/apply-manual-gift-corrections.js"
+  },
+  "dependencies": {
+    "playwright-core": "^1.61.1",
+    "qrcode": "^1.5.4",
+    "ws": "^8.21.0",
+    "pngjs": "^7.0.0"
+  }
+}

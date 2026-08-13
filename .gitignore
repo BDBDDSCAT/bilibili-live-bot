@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+.playwright-cli/
+.tmp/
+state/
+artifacts/
+screenshots/
+coverage/
+config.json
+config.local.json
+.env
+.env.*
+!.env.example
+*.log
