@@ -3428,6 +3428,41 @@ async function verifyHumanTimingRandomIntervals() {
   assert(browser.sendCalls.length === sentBeforeStop, "stop must cancel human-timed pending sends");
 }
 
+async function verifyDoctorWithoutConfiguredRoom() {
+  const rootDir = path.resolve(__dirname, "..");
+  const config = deepMergeConfig(DEFAULT_CONFIG, {
+    room: "",
+    connection: { autoStartSafe: false },
+    history: { enabled: false, dir: path.join(TMP_ROOT, "verify-doctor-empty-room") },
+    retention: { enabled: false },
+  });
+  const app = createWebApp({ rootDir, config });
+  const server = http.createServer(app.handleRequest);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const doctorResponse = await fetch(`${baseUrl}/api/doctor?format=json`);
+    const doctor = await doctorResponse.json();
+    assert(doctorResponse.status === 200, "doctor should not return 500 before the first room is configured");
+    assert(
+      doctor.ok === true && doctor.safeMode === true && doctor.selfTest?.isolated === true,
+      "empty-room doctor should return a safe setup-state report with isolated self-test evidence"
+    );
+
+    const selfTestResponse = await fetch(`${baseUrl}/api/self-test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const selfTest = await selfTestResponse.json();
+    assert(selfTestResponse.status === 200 && selfTest.ok === true, "self-test should use its fake room before setup");
+  } finally {
+    await app.stop();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
 async function verifyBrowserControlApiAutoStart() {
   const rootDir = path.resolve(__dirname, "..");
   const fakeBrowser = new FakeBrowserController(20002);
@@ -3896,6 +3931,7 @@ const VERIFY_TESTS = [
   verifyDockerDeploymentFiles,
   verifyBrowserRuntimeTransportAndEmergencyStop,
   verifyHumanTimingRandomIntervals,
+  verifyDoctorWithoutConfiguredRoom,
   verifyBrowserControlApiAutoStart,
 ];
 

@@ -3243,7 +3243,7 @@ function createWebApp({
         const result = runAssistantSelfTest({
           config,
           room: body.room || runtime?.roomInput || config.room,
-          roomId: runtime?.roomInfo?.roomId || extractRoomId(body.room || config.room),
+          roomId: runtime?.roomInfo?.roomId || roomIdFromValue(body.room || config.room),
         });
         sendJson(res, result.ok ? 200 : 500, selfTestResponse(result));
         return;
@@ -3281,7 +3281,7 @@ function createWebApp({
           snapshot = currentSnapshot;
         }
         const roomValue = body.room || currentSnapshot.room?.roomId || currentSnapshot.roomInput || runtime?.room || config.room;
-        const roomId = Number(currentSnapshot.room?.roomId || extractRoomId(roomValue) || 0);
+        const roomId = Number(currentSnapshot.room?.roomId || roomIdFromValue(roomValue) || 0);
         const selfTest = runAssistantSelfTest({
           config,
           room: roomValue || config.room,
