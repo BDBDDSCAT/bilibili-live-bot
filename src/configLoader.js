@@ -45,8 +45,8 @@ const DEFAULT_CONFIG = {
     welcome: { enabled: true },
     giftThanks: { enabled: true, minCoin: 0 },
     pk: { enabled: true },
-    rotation: { enabled: true },
-    ai: { enabled: true },
+    rotation: { enabled: false },
+    ai: { enabled: false },
     spam: { enabled: true },
     guardBoard: { enabled: true },
     history: { enabled: true },
@@ -60,7 +60,7 @@ const DEFAULT_CONFIG = {
     assistantUids: [],
   },
   automation: {
-    enabled: true,
+    enabled: false,
     autoSendTypes: [
       "reply",
       "command_reply",

@@ -18,6 +18,7 @@ const state = {
   roomUrl: "",
   roomInfo: {},
   roomBusy: false,
+  roomPersistenceWarning: "",
 };
 
 function sentCount() {
@@ -131,7 +132,8 @@ function renderManagedRoom(target, message = "") {
   if (document.activeElement !== els.roomInput || message) {
     els.roomInput.value = target.roomUrl;
   }
-  els.roomMessage.textContent = message || `当前托管：房间 ${target.roomId}`;
+  els.roomMessage.textContent =
+    state.roomPersistenceWarning || message || `当前托管：房间 ${target.roomId}`;
 }
 
 function renderRoomIdentity(room = {}) {
@@ -248,6 +250,9 @@ function controlStatusDetail(control = {}, phase = phaseFromControl(control)) {
   if (phase === "running" && Number(state.snapshot?.room?.liveStatus ?? -1) === 0) {
     return "已登录；直播间未开播，开播后会自动回复、发言和点赞。";
   }
+  if (phase === "running" && state.snapshot?.autoLikeSchedule?.budgetHealthy === false) {
+    return "B站已连接；自动点赞已暂停，其他已开启功能继续运行。";
+  }
   if (phase === "running" && localAiProblem(state.snapshot)) {
     return "B站已连接；AI 暂时断开，其他已开启的功能继续运行。";
   }
@@ -314,7 +319,10 @@ function updateControl(control = {}) {
     state.latestReply = state.control.lastSendText;
   }
   renderSendSummary();
-  if (Number(state.snapshot?.autoLikeSchedule?.sessionTargetClicks || 0) <= 0) {
+  if (
+    state.snapshot?.autoLikeSchedule?.budgetHealthy !== false &&
+    Number(state.snapshot?.autoLikeSchedule?.sessionTargetClicks || 0) <= 0
+  ) {
     els.likeCount.textContent = `${formatNumber(state.control.likeCount || 0)} 次`;
   }
   renderPhase(phase, controlStatusDetail(state.control, phase));
@@ -324,14 +332,23 @@ function moduleEnabled(moduleStatus = {}, names = []) {
   return names.every((name) => moduleStatus?.[name]?.enabled !== false);
 }
 
-function renderFeatureSwitches(moduleStatus = {}) {
-  document.querySelectorAll("[data-modules]").forEach((input) => {
+function renderFeatureSwitches(featureStatus = {}, moduleStatus = {}) {
+  const legacyMappings = {
+    welcome: ["welcome"],
+    autoLike: ["autoLike"],
+    giftThanks: ["giftThanks", "guardBoard"],
+    ai: ["ai"],
+    pk: ["pk"],
+    rotation: ["rotation"],
+  };
+  document.querySelectorAll("[data-feature]").forEach((input) => {
     if (input === document.activeElement) return;
-    const names = String(input.dataset.modules || "")
-      .split(",")
-      .map((name) => name.trim())
-      .filter(Boolean);
-    input.checked = moduleEnabled(moduleStatus, names);
+    const name = String(input.dataset.feature || "").trim();
+    const configured = featureStatus?.[name]?.enabled;
+    input.checked =
+      typeof configured === "boolean"
+        ? configured
+        : moduleEnabled(moduleStatus, legacyMappings[name] || [name]);
   });
 }
 
@@ -346,7 +363,7 @@ function renderSnapshot(snapshot = {}) {
   renderRoomIdentity(snapshot.room || {});
   if (snapshot.browserControl) updateControl(snapshot.browserControl);
   renderLocalAiStatus(snapshot);
-  renderFeatureSwitches(snapshot.moduleStatus || {});
+  renderFeatureSwitches(snapshot.featureStatus || {}, snapshot.moduleStatus || {});
 
   const queue = Array.isArray(snapshot.autoSendQueue) ? snapshot.autoSendQueue : [];
   const sentInQueue = queue.filter((item) => item.status === "sent").length;
@@ -364,7 +381,9 @@ function renderSnapshot(snapshot = {}) {
   const likeSchedule = snapshot.autoLikeSchedule || {};
   const likeTarget = Number(likeSchedule.sessionTargetClicks || 0);
   const likeProgress = Number(likeSchedule.sessionClicks || 0);
-  if (likeTarget > 0) {
+  if (likeSchedule.budgetHealthy === false) {
+    els.likeCount.textContent = "已停止 · 点赞额度保存失败";
+  } else if (likeTarget > 0) {
     els.likeCount.textContent = likeSchedule.limitReached
       ? `本场完成 ${formatNumber(likeProgress)} 次`
       : likeSchedule.waitingForLive
@@ -406,6 +425,11 @@ function addActivity(entry = {}) {
 }
 
 function updateFromPayload(payload = {}) {
+  if (typeof payload.warning === "string") {
+    state.roomPersistenceWarning = payload.warning.trim();
+  } else if (typeof payload.snapshot?.roomPersistenceWarning === "string") {
+    state.roomPersistenceWarning = payload.snapshot.roomPersistenceWarning.trim();
+  }
   const managedRoom = roomTargetFromPayload(payload);
   if (managedRoom) renderManagedRoom(managedRoom);
   if (payload.snapshot) renderSnapshot(payload.snapshot);
@@ -440,8 +464,14 @@ async function startRobot() {
   renderPhase("waiting");
   els.stopButton.hidden = false;
   try {
-    updateFromPayload(await postJson("/api/browser-control/start", { room: target.roomUrl }));
-    saveRoomTarget(target);
+    const payload = await postJson("/api/browser-control/start", { room: target.roomUrl });
+    state.roomPersistenceWarning = String(payload.warning || "").trim();
+    updateFromPayload(payload);
+    if (payload.persisted !== false) {
+      state.roomPersistenceWarning = "";
+      saveRoomTarget(target);
+    }
+    renderManagedRoom(target);
     if (state.phase === "stopped") renderPhase("waiting");
   } catch {
     renderPhase("stopped", "没能打开 B站，请再点一次。");
@@ -470,8 +500,12 @@ async function switchManagedRoom(event) {
   els.roomMessage.textContent = `正在切换到房间 ${target.roomId}…`;
   try {
     const payload = await postJson("/api/browser-control/start", { room: target.roomUrl });
+    state.roomPersistenceWarning = String(payload.warning || "").trim();
     updateFromPayload(payload);
-    saveRoomTarget(target);
+    if (payload.persisted !== false) {
+      state.roomPersistenceWarning = "";
+      saveRoomTarget(target);
+    }
     const control = controlFromPayload(payload);
     const message = control.ready
       ? `已切换到房间 ${target.roomId}，机器人继续运行。`
@@ -539,18 +573,19 @@ async function restartLocalAi() {
 
 async function setFeature(input) {
   const enabled = input.checked;
-  const names = String(input.dataset.modules || "")
-    .split(",")
-    .map((name) => name.trim())
-    .filter(Boolean);
+  const name = String(input.dataset.feature || "").trim();
   input.disabled = true;
   try {
-    for (const name of names) {
-      const payload = await postJson("/api/modules", { name, enabled });
-      if (payload.snapshot) renderSnapshot(payload.snapshot);
-    }
+    const payload = await postJson("/api/features", { name, enabled });
+    if (payload.snapshot) renderSnapshot(payload.snapshot);
     const label = input.closest(".feature-row")?.querySelector("strong")?.textContent || "这项功能";
-    els.featureMessage.textContent = `${label}已${enabled ? "开启" : "关闭"}。`;
+    const status = payload.snapshot?.featureStatus?.[name] || {};
+    const waiting = Array.isArray(status.blockers) ? status.blockers[0] : "";
+    els.featureMessage.textContent = payload.warning
+      ? payload.warning
+      : enabled && waiting
+        ? `${label}已开启，${waiting}。`
+        : `${label}已${enabled ? "开启" : "关闭"}。`;
   } catch {
     input.checked = !enabled;
     els.featureMessage.textContent = "没有改成功，请再点一次。";
@@ -728,7 +763,7 @@ function bindEvents() {
   els.stopButton.addEventListener("click", stopRobot);
   els.restartAiButton?.addEventListener("click", restartLocalAi);
   els.roomForm.addEventListener("submit", switchManagedRoom);
-  document.querySelectorAll("[data-modules]").forEach((input) => {
+  document.querySelectorAll("[data-feature]").forEach((input) => {
     input.addEventListener("change", () => setFeature(input));
   });
   document.querySelectorAll("[data-copy-overlay]").forEach((button) => {

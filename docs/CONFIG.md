@@ -38,9 +38,11 @@
 | `autoRelaunchOnClose` | `true` | Chrome 被手动关掉后 5 秒起指数退避自动重开 |
 | `statusPollMs` | `1500` | 托管状态轮询间隔（旧键 `loginPollMs` 仍兼容） |
 
-## modules（页面上的功能开关，改动会写回 config.json）
+## modules（底层模块开关）
 
 `autoSend`、`autoLike`、`welcome`、`giftThanks`、`pk`、`rotation`（主动发言）、`ai`、`spam`、`guardBoard`、`history`。每项 `{ "enabled": true/false }`。公开模板关闭 `autoSend`、`autoLike`、`rotation` 和 `ai`。
+
+主播控制台使用高层功能开关，会原子地同步所有依赖：例如 AI 同时更新 `modules.ai` 和 `localAi.enabled`，自动点赞同时更新模块、浏览器托管和点赞调度开关，礼物感谢同步礼物、SC 与上舰处理。不建议手工只修改某一个底层键。
 
 ## roles（权限）
 
@@ -53,7 +55,7 @@
 
 ## automation（发送队列）
 
-`autoSendTypes`（允许自动发送的动作类型）、`queueLimit`（队列上限 80）、`pauseWelcomeDuringLottery`/`pauseGiftDuringLottery`（天选/抽奖时暂停欢迎与感谢）、`humanTiming`（队列抖动：动作延迟 500–1800ms、发送间隔 2–5s，不用于规避平台检测）、`startupMessage`（上线弹幕，默认关）。公开模板关闭整个自动发送队列。
+`autoSendTypes`（允许自动发送的动作类型）、`queueLimit`（队列上限 80）、`pauseWelcomeDuringLottery`/`pauseGiftDuringLottery`（天选/抽奖时暂停欢迎与感谢）、`humanTiming`（队列抖动：动作延迟 500–1800ms、发送间隔 2–5s，不用于规避平台检测）、`startupMessage`（上线弹幕，默认关）。公开模板关闭整个自动发送队列；只有使用者点击“打开 B站并登录”或明确开启自动输出功能后才会授权。
 
 ## localAi（本地 Qwen）
 
@@ -69,6 +71,7 @@
 | `maxChars` | `36` | 目标回复长度（40 字硬 gate 之内） |
 | `viewerReplyCooldownMs` | `1500` | 同一观众回复冷却 |
 | `allViewerChats` | `true` | 普通弹幕也交给 AI（false 则只回艾特） |
+| `fallbackToRules` | `false` | AI 未处理时是否允许普通关键词固定话术；公开模板关闭，避免模板冒充 AI |
 | `proactive.*` | `enabled: false, onlyWhenLive: true` | 仅开播后按配置节奏主动发言（同时受 modules.rotation 控制） |
 
 一键恢复只对 `enabled=true` 的本机 Ollama loopback 地址生效。启动前会读取 `/api/tags` 确认配置模型；服务在线但模型缺失时只报错，不会自动 `pull`。另有 `contextBudget`（提示词背景预算，默认 1800 码点）。

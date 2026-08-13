@@ -73,6 +73,7 @@ class LocalAiService {
     this.pollIntervalMs = finitePositive(dependencies.pollIntervalMs, 500, 50);
     this.probeTimeoutMs = finitePositive(dependencies.probeTimeoutMs, 1500, 250);
     this.inFlight = null;
+    this.generation = 0;
     this.state = {
       status: "idle",
       message: "尚未检查本地 AI",
@@ -85,7 +86,21 @@ class LocalAiService {
     return { ...this.state };
   }
 
-  setState(status, message) {
+  reconfigure(options = {}) {
+    this.generation += 1;
+    this.inFlight = null;
+    this.options = { ...(options || {}) };
+    this.state = {
+      status: this.options.enabled === true ? "idle" : "skipped",
+      message: this.options.enabled === true ? "本地 AI 配置已更新，等待检查" : "本地 AI 未启用",
+      model: safeModelName(this.options.model),
+      lastCheckedAt: Number(this.now()) || Date.now(),
+    };
+    return this.getState();
+  }
+
+  setState(status, message, generation = this.generation) {
+    if (generation !== this.generation) return this.getState();
     this.state = {
       status,
       message: String(message || "").replace(/[\r\n\t]/g, " ").trim().slice(0, 300),
@@ -97,62 +112,67 @@ class LocalAiService {
 
   ensureReady() {
     if (this.inFlight) return this.inFlight;
-    this.inFlight = this.runEnsureReady()
+    const generation = this.generation;
+    const pending = this.runEnsureReady(generation)
       .catch((error) =>
-        this.setState("error", `本地 AI 检查失败：${error?.message || String(error)}`)
+        this.setState("error", `本地 AI 检查失败：${error?.message || String(error)}`, generation)
       )
       .finally(() => {
-        this.inFlight = null;
+        if (this.inFlight === pending) this.inFlight = null;
       });
-    return this.inFlight;
+    this.inFlight = pending;
+    return pending;
   }
 
-  async runEnsureReady() {
+  async runEnsureReady(generation = this.generation) {
     const enabled = this.options.enabled === true;
     const provider = String(this.options.provider || "ollama").trim().toLowerCase();
-    if (!enabled) return this.setState("skipped", "本地 AI 未启用");
+    if (!enabled) return this.setState("skipped", "本地 AI 未启用", generation);
     if (provider !== "ollama") {
-      return this.setState("skipped", "一键自动恢复仅支持本地 Ollama");
+      return this.setState("skipped", "一键自动恢复仅支持本地 Ollama", generation);
     }
     const model = safeModelName(this.options.model);
-    if (!model) return this.setState("error", "未配置 Ollama 模型");
+    if (!model) return this.setState("error", "未配置 Ollama 模型", generation);
     const endpoint = parseLoopbackEndpoint(
       this.options.endpoint || this.options.baseUrl || "http://127.0.0.1:11434"
     );
-    if (!endpoint.ok) return this.setState("skipped", endpoint.message);
+    if (!endpoint.ok) return this.setState("skipped", endpoint.message, generation);
     if (typeof this.fetchImpl !== "function") {
-      return this.setState("error", "当前环境没有可用的 fetch，无法检查 Ollama");
+      return this.setState("error", "当前环境没有可用的 fetch，无法检查 Ollama", generation);
     }
 
-    this.setState("checking", `正在检查 Ollama 模型 ${model}`);
+    this.setState("checking", `正在检查 Ollama 模型 ${model}`, generation);
     const firstProbe = await this.probe(endpoint.baseUrl, model);
-    if (firstProbe.ready) return this.setState("ready", `Ollama 与模型 ${model} 已就绪`);
-    if (firstProbe.reachable) return this.setState("error", firstProbe.message);
+    if (generation !== this.generation) return this.getState();
+    if (firstProbe.ready) return this.setState("ready", `Ollama 与模型 ${model} 已就绪`, generation);
+    if (firstProbe.reachable) return this.setState("error", firstProbe.message, generation);
     if (this.options.autoStart !== true) {
-      return this.setState("error", "Ollama 不可达，自动启动已关闭");
+      return this.setState("error", "Ollama 不可达，自动启动已关闭", generation);
     }
     if (this.platform !== "darwin") {
-      return this.setState("error", "Ollama 不可达；当前系统不支持自动打开 Ollama 应用");
+      return this.setState("error", "Ollama 不可达；当前系统不支持自动打开 Ollama 应用", generation);
     }
 
-    this.setState("checking", "Ollama 未运行，正在自动打开");
+    this.setState("checking", "Ollama 未运行，正在自动打开", generation);
     await this.launchOllama();
+    if (generation !== this.generation) return this.getState();
     const timeoutMs = finitePositive(this.options.startupTimeoutMs, 15000, 1000);
     const deadline = Number(this.now()) + timeoutMs;
     let remainingPolls = Math.ceil(timeoutMs / this.pollIntervalMs) + 1;
     do {
       remainingPolls -= 1;
       const nextProbe = await this.probe(endpoint.baseUrl, model);
+      if (generation !== this.generation) return this.getState();
       if (nextProbe.ready) {
-        return this.setState("ready", `Ollama 已自动启动，模型 ${model} 已就绪`);
+        return this.setState("ready", `Ollama 已自动启动，模型 ${model} 已就绪`, generation);
       }
       // 服务已经上线但模型缺失/接口异常时立即结束，不 pull，也不继续假等。
-      if (nextProbe.reachable) return this.setState("error", nextProbe.message);
+      if (nextProbe.reachable) return this.setState("error", nextProbe.message, generation);
       const remainingMs = deadline - Number(this.now());
       if (remainingMs <= 0) break;
       await this.sleep(Math.min(this.pollIntervalMs, remainingMs));
     } while (remainingPolls > 0 && Number(this.now()) < deadline);
-    return this.setState("error", `Ollama 打开后 ${timeoutMs}ms 内仍不可用`);
+    return this.setState("error", `Ollama 打开后 ${timeoutMs}ms 内仍不可用`, generation);
   }
 
   async launchOllama() {

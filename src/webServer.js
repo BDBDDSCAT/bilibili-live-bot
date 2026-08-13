@@ -18,7 +18,7 @@ const { extractRoomId } = require("./bilibiliClient");
 const { BotRuntime } = require("./botRuntime");
 const { AutoLikeBudgetStore } = require("./autoLikeBudgetStore");
 const BrowserControllerModule = require("./browserController");
-const { loadConfig: loadMergedConfig } = require("./configLoader");
+const { loadConfig: loadMergedConfig, validateConfig } = require("./configLoader");
 const { EventStore, summarizeGifts } = require("./eventStore");
 const { GiftCatalog } = require("./giftCatalog");
 const { formatBattery } = require("./interactionEngine");
@@ -30,6 +30,15 @@ const { ScreenshotService } = require("./screenshotService");
 const { startRetentionSchedule } = require("./stateRetention");
 
 const BrowserController = BrowserControllerModule.BrowserController || BrowserControllerModule;
+
+const FEATURE_NAMES = new Set([
+  "welcome",
+  "autoLike",
+  "giftThanks",
+  "ai",
+  "pk",
+  "rotation",
+]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -1420,6 +1429,7 @@ function createWebApp({
     });
   const localAiService =
     injectedLocalAiService || new LocalAiService(config.localAi || {});
+  let localAiProbeGeneration = 0;
   let localAiServiceState = localAiService.getState?.() || {
     status: "idle",
     message: "尚未检查本地 AI",
@@ -1434,6 +1444,9 @@ function createWebApp({
   let browserControlGeneration = 0;
   let startupMessageGeneration = -1;
   let browserAutoStartPromise = null;
+  let browserStartAuthorizing = false;
+  let browserControlStartChain = Promise.resolve();
+  let roomPersistenceWarning = "";
   let autoLikeTimer = null;
   let autoLikeDayRolloverTimer = null;
   let autoLikeGeneration = 0;
@@ -1447,12 +1460,16 @@ function createWebApp({
   let autoLikeSessionTargetClicks = 0;
   let autoLikeSessionClicks = 0;
   let autoLikeLimitReached = false;
+  let autoLikeBudgetHealthy = true;
+  let autoLikeBudgetError = "";
   const randomFn = typeof injectedRandomFn === "function" ? injectedRandomFn : Math.random;
   let lastStartBody = null;
   let watchdogTimer = null;
   let watchdogRestarting = false;
   let lastWatchdogRestartAt = 0;
   let disconnectedSince = 0;
+  let configRevision = 0;
+  let configMutationChain = Promise.resolve();
   let snapshot = {
     running: false,
     connected: false,
@@ -1489,6 +1506,27 @@ function createWebApp({
 
   function applyLocalAiServiceState(nextRuntime = runtime) {
     nextRuntime?.localAiClient?.applyServiceProbe?.(getLocalAiServiceState());
+  }
+
+  function reconfigureLocalAiService() {
+    localAiProbeGeneration += 1;
+    if (typeof localAiService.reconfigure === "function") {
+      localAiServiceState =
+        localAiService.reconfigure(config.localAi || {}) ||
+        localAiService.getState?.() ||
+        localAiServiceState;
+    } else {
+      // 测试/外部注入的服务若不支持重配置，不伪造 ready；
+      // 真实 LocalAiService 始终实现 reconfigure。
+      localAiServiceState = {
+        status: config.localAi?.enabled === true ? "idle" : "skipped",
+        message: config.localAi?.enabled === true ? "本地 AI 配置已更新，等待检查" : "本地 AI 未启用",
+        model: String(config.localAi?.model || ""),
+        lastCheckedAt: Date.now(),
+      };
+    }
+    applyLocalAiServiceState();
+    return getLocalAiServiceState();
   }
 
   function getBrowserControlState() {
@@ -1603,8 +1641,12 @@ function createWebApp({
         limitReached: autoLikeLimitReached,
         updatedAt: Date.now(),
       });
+      autoLikeBudgetHealthy = true;
+      autoLikeBudgetError = "";
       return true;
     } catch (error) {
+      autoLikeBudgetHealthy = false;
+      autoLikeBudgetError = String(error?.message || error || "未知错误").slice(0, 240);
       warnWithoutBlocking("自动点赞预算保存失败", error);
       return false;
     }
@@ -1619,29 +1661,46 @@ function createWebApp({
     autoLikeSessionGeneration = generation;
     autoLikeSessionRoomId = Number(roomId || 0);
     autoLikeSessionDay = day;
+    autoLikeSessionTargetClicks = 0;
+    autoLikeSessionClicks = 0;
+    autoLikeLimitReached = false;
+    autoLikeLastBurstCount = 0;
+    autoLikeBudgetHealthy = true;
+    autoLikeBudgetError = "";
     let restored = null;
     try {
       restored = autoLikeBudgetStore.load(autoLikeSessionRoomId);
     } catch (error) {
+      autoLikeBudgetHealthy = false;
+      autoLikeBudgetError = String(error?.message || error || "未知错误").slice(0, 240);
       warnWithoutBlocking("自动点赞预算读取失败", error);
+      return false;
     }
     if (restored) {
       autoLikeSessionTargetClicks = restored.targetClicks;
       autoLikeSessionClicks = restored.successfulClicks;
       autoLikeLimitReached = restored.limitReached;
       autoLikeLastBurstCount = 0;
-      return;
+      return true;
     }
     autoLikeSessionTargetClicks = randomSessionTargetClicks(settings);
     autoLikeSessionClicks = 0;
     autoLikeLimitReached = false;
     autoLikeLastBurstCount = 0;
-    persistAutoLikeSession();
+    return persistAutoLikeSession();
   }
 
   function ensureAutoLikeSession() {
     const roomId = currentAutoLikeRoomId();
     const day = autoLikeBudgetStore.currentDay?.() || localDayKey();
+    if (
+      !autoLikeBudgetHealthy &&
+      autoLikeSessionGeneration === browserControlGeneration &&
+      autoLikeSessionRoomId === roomId &&
+      autoLikeSessionDay === day
+    ) {
+      return false;
+    }
     if (
       autoLikeSessionGeneration !== browserControlGeneration ||
       autoLikeSessionRoomId !== roomId ||
@@ -1650,10 +1709,10 @@ function createWebApp({
     ) {
       resetAutoLikeSession(browserControlGeneration, roomId);
     }
+    return autoLikeBudgetHealthy && autoLikeSessionTargetClicks > 0;
   }
 
   function autoLikeEnabled() {
-    ensureAutoLikeSession();
     const settings = config.browserAutomation || {};
     const autoLike = settings.autoLike || {};
     const moduleEnabled = runtime?.isModuleEnabled
@@ -1661,7 +1720,7 @@ function createWebApp({
       : config.modules?.autoLike?.enabled === true;
     const liveEligible =
       autoLike.onlyWhenLive === false || Number(runtime?.roomInfo?.liveStatus ?? -1) === 1;
-    return Boolean(
+    const eligible = Boolean(
       browserControlDesired &&
         !manualStopped &&
         browserControlReady() &&
@@ -1670,9 +1729,10 @@ function createWebApp({
         settings.enabled !== false &&
         autoLike.enabled === true &&
         moduleEnabled &&
-        liveEligible &&
-        !autoLikeLimitReached
+        liveEligible
     );
+    if (!eligible || !ensureAutoLikeSession()) return false;
+    return autoLikeBudgetHealthy && !autoLikeLimitReached;
   }
 
   function clearAutoLikeSchedule() {
@@ -1722,23 +1782,47 @@ function createWebApp({
       const burstCount = Math.min(randomBurstCount(settings), remainingClicks);
       autoLikeLastBurstCount = burstCount;
       let likeResult = null;
+      const clicksBeforeReservation = autoLikeSessionClicks;
+      let reservationPersisted = false;
       try {
         if (burstCount > 0) {
-          likeResult = await browserController.like?.({
-            roomId: Number(runtime?.roomInfo?.roomId || roomIdFromValue(browserControlRoom || config.room)),
-            count: burstCount,
-            shouldContinue: () =>
-              generation === autoLikeGeneration &&
-              autoLikeSessionGeneration === sessionGeneration &&
-              autoLikeEnabled(),
-          });
+          // 先把整批点击写入预算作为保守预留；写盘失败则一票都不点。
+          // 若进程在真正点击或回写实际成功数前崩溃，最多会少点，绝不会因旧预算重复超上限。
+          autoLikeSessionClicks = Math.min(
+            autoLikeSessionTargetClicks,
+            clicksBeforeReservation + burstCount
+          );
+          reservationPersisted = persistAutoLikeSession();
+          if (reservationPersisted) {
+            likeResult = await browserController.like?.({
+              roomId: Number(runtime?.roomInfo?.roomId || roomIdFromValue(browserControlRoom || config.room)),
+              count: burstCount,
+              shouldContinue: () =>
+                generation === autoLikeGeneration &&
+                autoLikeSessionGeneration === sessionGeneration &&
+                autoLikeBudgetHealthy &&
+                browserControlDesired &&
+                !manualStopped &&
+                browserControlReady() &&
+                runtime?.running &&
+                runtime?.browserAuto &&
+                (settings.onlyWhenLive === false ||
+                  Number(runtime?.roomInfo?.liveStatus ?? -1) === 1),
+            });
+          } else {
+            autoLikeSessionClicks = clicksBeforeReservation;
+          }
         }
       } catch (error) {
         runtime?.log?.("自动点赞失败", error.message || String(error), { level: "warn" });
       } finally {
         autoLikeInFlight = false;
       }
-      if (sessionGeneration === autoLikeSessionGeneration && burstCount > 0) {
+      if (
+        reservationPersisted &&
+        sessionGeneration === autoLikeSessionGeneration &&
+        burstCount > 0
+      ) {
         const reportedCount = Number(likeResult?.count);
         const successfulClicks = Math.min(
           burstCount,
@@ -1753,7 +1837,7 @@ function createWebApp({
         );
         autoLikeSessionClicks = Math.min(
           autoLikeSessionTargetClicks,
-          autoLikeSessionClicks + successfulClicks
+          clicksBeforeReservation + successfulClicks
         );
         if (autoLikeSessionClicks >= autoLikeSessionTargetClicks) {
           autoLikeLimitReached = true;
@@ -1824,6 +1908,80 @@ function createWebApp({
     return true;
   }
 
+  function configuredFeatureEnabled(name, source = config) {
+    const modules = source.modules || {};
+    if (name === "welcome") {
+      return modules.welcome?.enabled !== false && source.interactions?.welcome?.enabled !== false;
+    }
+    if (name === "autoLike") {
+      return (
+        modules.autoLike?.enabled === true &&
+        source.browserAutomation?.enabled === true &&
+        source.browserAutomation?.autoLike?.enabled === true
+      );
+    }
+    if (name === "giftThanks") {
+      return (
+        modules.giftThanks?.enabled !== false &&
+        modules.guardBoard?.enabled !== false &&
+        source.interactions?.gift?.enabled !== false &&
+        source.interactions?.superChat?.enabled !== false &&
+        source.interactions?.guard?.enabled !== false
+      );
+    }
+    if (name === "ai") {
+      return modules.ai?.enabled === true && source.localAi?.enabled === true;
+    }
+    if (name === "pk") return modules.pk?.enabled !== false;
+    if (name === "rotation") {
+      return (
+        modules.rotation?.enabled === true &&
+        modules.ai?.enabled === true &&
+        source.localAi?.enabled === true &&
+        source.localAi?.proactive?.enabled === true
+      );
+    }
+    return false;
+  }
+
+  function featureStatusSnapshot() {
+    const live = Number(runtime?.roomInfo?.liveStatus ?? snapshot?.room?.liveStatus ?? -1) === 1;
+    const browserReady = browserControlReady();
+    const runtimeAiState = runtime?.localAiClient?.getState?.() || null;
+    const aiReady =
+      getLocalAiServiceState().status === "ready" &&
+      (!runtime || runtimeAiState?.available === true);
+    const result = { revision: configRevision };
+    for (const name of FEATURE_NAMES) {
+      const enabled = configuredFeatureEnabled(name);
+      const blockers = [];
+      if (enabled && name === "pk" && (!runtime?.running || !runtime?.connected)) {
+        blockers.push("直播间监听未运行");
+      }
+      if (enabled && name !== "pk") {
+        if (!browserControlDesired || !browserReady || !runtime?.browserAuto) blockers.push("请先打开 B站并登录");
+        if (!config.automation?.enabled) blockers.push("尚未授权自动托管");
+        if (!config.modules?.autoSend?.enabled) blockers.push("自动发送未开启");
+        if (!live) blockers.push("等待开播");
+      }
+      if (enabled && (name === "ai" || name === "rotation") && !aiReady) {
+        blockers.push("本地 Qwen 未就绪");
+      }
+      if (enabled && name === "autoLike" && autoLikeLimitReached) {
+        blockers.push("已到当日点赞上限");
+      }
+      if (enabled && name === "autoLike" && !autoLikeBudgetHealthy) {
+        blockers.push("点赞额度无法安全保存，已停止");
+      }
+      result[name] = {
+        enabled,
+        effective: enabled && blockers.length === 0,
+        blockers,
+      };
+    }
+    return result;
+  }
+
   function syncBrowserControlSnapshot() {
     const browserControl = getBrowserControlState();
     const managedRoom =
@@ -1840,6 +1998,8 @@ function createWebApp({
         : {}),
       browserControl,
       localAiService: getLocalAiServiceState(),
+      roomPersistenceWarning,
+      featureStatus: featureStatusSnapshot(),
       autoLikeSchedule: {
         onlyWhenLive: config.browserAutomation?.autoLike?.onlyWhenLive !== false,
         waitingForLive:
@@ -1847,6 +2007,7 @@ function createWebApp({
           Number(runtime?.roomInfo?.liveStatus ?? -1) !== 1 &&
           browserControlDesired &&
           !manualStopped &&
+          autoLikeBudgetHealthy &&
           config.browserAutomation?.autoLike?.enabled === true &&
           (runtime?.isModuleEnabled
             ? runtime.isModuleEnabled("autoLike")
@@ -1865,6 +2026,8 @@ function createWebApp({
         sessionTargetClicks: autoLikeSessionTargetClicks,
         sessionClicks: autoLikeSessionClicks,
         limitReached: autoLikeLimitReached,
+        budgetHealthy: autoLikeBudgetHealthy,
+        budgetError: autoLikeBudgetError,
       },
       sendTransport: runtime?.browserAuto
         ? "browser"
@@ -1877,6 +2040,92 @@ function createWebApp({
 
   function clonePlain(value) {
     return JSON.parse(JSON.stringify(value === undefined ? null : value));
+  }
+
+  function setNestedEnabled(parent, key, enabled) {
+    parent[key] = {
+      ...(parent[key] || {}),
+      enabled: Boolean(enabled),
+    };
+  }
+
+  function applyFeatureConfig(target, name, enabled) {
+    if (!FEATURE_NAMES.has(name)) {
+      const error = new Error(`不支持的功能：${name || "(空)"}`);
+      error.statusCode = 400;
+      throw error;
+    }
+    const nextEnabled = enabled !== false;
+    target.modules = target.modules || {};
+    target.interactions = target.interactions || {};
+    target.automation = target.automation || {};
+    target.browserAutomation = target.browserAutomation || {};
+    target.browserAutomation.autoLike = target.browserAutomation.autoLike || {};
+    target.localAi = target.localAi || {};
+    target.localAi.proactive = target.localAi.proactive || {};
+
+    if (name === "welcome") {
+      setNestedEnabled(target.modules, "welcome", nextEnabled);
+      setNestedEnabled(target.interactions, "welcome", nextEnabled);
+    } else if (name === "giftThanks") {
+      setNestedEnabled(target.modules, "giftThanks", nextEnabled);
+      setNestedEnabled(target.modules, "guardBoard", nextEnabled);
+      setNestedEnabled(target.interactions, "gift", nextEnabled);
+      setNestedEnabled(target.interactions, "superChat", nextEnabled);
+      setNestedEnabled(target.interactions, "guard", nextEnabled);
+    } else if (name === "autoLike") {
+      setNestedEnabled(target.modules, "autoLike", nextEnabled);
+      target.browserAutomation.autoLike.enabled = nextEnabled;
+      if (nextEnabled) target.browserAutomation.enabled = true;
+    } else if (name === "ai") {
+      setNestedEnabled(target.modules, "ai", nextEnabled);
+      target.localAi.enabled = nextEnabled;
+      if (!nextEnabled) {
+        setNestedEnabled(target.modules, "rotation", false);
+        target.localAi.proactive.enabled = false;
+      }
+    } else if (name === "rotation") {
+      setNestedEnabled(target.modules, "rotation", nextEnabled);
+      target.localAi.proactive.enabled = nextEnabled;
+      if (nextEnabled) {
+        setNestedEnabled(target.modules, "ai", true);
+        target.localAi.enabled = true;
+      }
+    } else if (name === "pk") {
+      setNestedEnabled(target.modules, "pk", nextEnabled);
+    }
+
+    // 单个功能关闭不应误伤其他功能；任一自动输出功能被用户明确开启时，
+    // 才授权共享的自动托管总开关。真实发送仍要求浏览器登录、目标房间和开播门禁。
+    if (nextEnabled && ["welcome", "giftThanks", "autoLike", "ai", "rotation"].includes(name)) {
+      target.automation.enabled = true;
+    }
+  }
+
+  function validateConfigOrThrow(source) {
+    const { errors } = validateConfig(source);
+    if (!errors.length) return;
+    const error = new Error(`配置校验失败：${errors.join("；")}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  function replaceConfigContents(source) {
+    const configPath = config.__path;
+    const configSource = config.__source;
+    const clean = clonePlain(source);
+    delete clean.__path;
+    delete clean.__source;
+    for (const key of Object.keys(config)) delete config[key];
+    Object.assign(config, clean);
+    config.__path = configPath;
+    config.__source = configSource;
+  }
+
+  function enqueueConfigMutation(task) {
+    const next = configMutationChain.then(task);
+    configMutationChain = next.catch(() => {});
+    return next;
   }
 
   function editableConfigSnapshot() {
@@ -2146,13 +2395,31 @@ function createWebApp({
     const draft = clonePlain(source);
     delete draft.__path;
     delete draft.__source;
-    const tempPath = `${targetPath}.tmp-${process.pid}`;
-    fs.writeFileSync(tempPath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
-    fs.renameSync(tempPath, targetPath);
+    const tempPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+    try {
+      fs.writeFileSync(tempPath, `${JSON.stringify(draft, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.renameSync(tempPath, targetPath);
+    } catch (error) {
+      try {
+        fs.rmSync(tempPath, { force: true });
+      } catch {}
+      throw error;
+    }
     if (targetPath !== config.__path) {
       config.__path = targetPath;
       config.__source = "config.json";
     }
+  }
+
+  function commitConfigDraft(draft) {
+    validateConfigOrThrow(draft);
+    saveConfigFile(draft);
+    replaceConfigContents(draft);
+    configRevision += 1;
+    return configRevision;
   }
 
   function persistManagedRoom(target) {
@@ -2163,19 +2430,46 @@ function createWebApp({
     draft.room = roomUrl;
     draft.browserAutomation = {
       ...(draft.browserAutomation || {}),
+      enabled: true,
       roomUrl,
     };
+    draft.automation = {
+      ...(draft.automation || {}),
+      enabled: true,
+    };
+    draft.modules = {
+      ...(draft.modules || {}),
+      autoSend: {
+        ...(draft.modules?.autoSend || {}),
+        enabled: true,
+      },
+    };
     try {
-      saveConfigFile(draft);
+      commitConfigDraft(draft);
+      roomPersistenceWarning = "";
+      return { persisted: true, warning: "" };
     } catch (error) {
       // 切房已经成功时，配置盘暂时不可写不能把正在工作的浏览器回滚掉。
       warnWithoutBlocking("直播间配置保存失败", error);
+      config.room = roomUrl;
+      config.browserAutomation = {
+        ...(config.browserAutomation || {}),
+        enabled: true,
+        roomUrl,
+      };
+      config.automation = {
+        ...(config.automation || {}),
+        enabled: true,
+      };
+      config.modules = config.modules || {};
+      setNestedEnabled(config.modules, "autoSend", true);
+      roomPersistenceWarning =
+        "本次会话已运行，但配置未能保存；请检查项目目录权限后再试一次。";
+      return {
+        persisted: false,
+        warning: roomPersistenceWarning,
+      };
     }
-    config.room = roomUrl;
-    config.browserAutomation = {
-      ...(config.browserAutomation || {}),
-      roomUrl,
-    };
   }
 
   function applyAndPersistEditableConfig(patch = {}) {
@@ -2184,8 +2478,7 @@ function createWebApp({
     draft.__path = config.__path;
     draft.__source = config.__source;
     mergeEditableConfig(patch, draft);
-    saveConfigFile(draft);
-    mergeEditableConfig(patch, config);
+    commitConfigDraft(draft);
   }
 
   async function restartRuntimeAfterConfigSave() {
@@ -2202,12 +2495,68 @@ function createWebApp({
       biliSendCooldownSec: previous.biliSendCooldownMs / 1000 || config.send?.cooldownSec || 8,
       showEvents: previous.showEvents,
       pkShowRawEvents: Boolean(config.pk?.showRawEvents),
-      moduleStatus: previous.moduleStatus || config.modules || {},
+      moduleStatus: config.modules || {},
+      browserAuto: Boolean(previous.browserAuto),
+      allowAutoSend: Boolean(previous.browserAuto || lastStartBody?.allowAutoSend),
+      forceRestart: true,
     });
     runtime?.log("配置", "运营配置已保存，并按当前房间自动重启监听");
     snapshot = runtime?.getSnapshot?.() || snapshot;
     broadcast("snapshot", snapshot);
     return true;
+  }
+
+  async function applyFeatureSetting(name, enabled) {
+    return enqueueConfigMutation(async () => {
+      const draft = clonePlain(config);
+      draft.__path = config.__path;
+      draft.__source = config.__source;
+      applyFeatureConfig(draft, name, enabled);
+      const revision = commitConfigDraft(draft);
+
+      if (name === "ai" || name === "rotation") reconfigureLocalAiService();
+
+      let restarted = false;
+      let warning = "";
+      if (runtime?.running) {
+        try {
+          restarted = await restartRuntimeAfterConfigSave();
+        } catch (error) {
+          warning = `配置已保存，但运行时重启失败：${error?.message || String(error)}`;
+          runtime?.log?.("配置", warning, { level: "warn" });
+        }
+      } else {
+        snapshot = {
+          ...snapshot,
+          moduleStatus: clonePlain(config.modules || {}),
+        };
+      }
+
+      if (name === "autoLike") {
+        if (enabled === false) clearAutoLikeSchedule();
+        else {
+          resetAutoLikeSession(browserControlGeneration, currentAutoLikeRoomId());
+          ensureAutoLikeSchedule(true);
+        }
+      }
+
+      let aiState = getLocalAiServiceState();
+      if ((name === "ai" || name === "rotation") && enabled !== false) {
+        aiState = await ensureLocalAiServiceReady();
+      }
+      syncBrowserControlSnapshot();
+      broadcast("snapshot", snapshot);
+      return {
+        ok: true,
+        name,
+        enabled: configuredFeatureEnabled(name),
+        revision,
+        restarted,
+        warning,
+        localAiService: aiState,
+        snapshot,
+      };
+    });
   }
 
   function rememberStartBody(body = {}) {
@@ -2387,20 +2736,28 @@ function createWebApp({
   }
 
   async function ensureLocalAiServiceReady() {
+    const probeGeneration = localAiProbeGeneration;
     let pending;
     try {
       pending = Promise.resolve(localAiService.ensureReady());
-      localAiServiceState = localAiService.getState?.() || localAiServiceState;
+      if (probeGeneration === localAiProbeGeneration) {
+        localAiServiceState = localAiService.getState?.() || localAiServiceState;
+      }
       syncBrowserControlSnapshot();
       broadcast("snapshot", snapshot);
-      localAiServiceState = (await pending) || localAiService.getState?.() || localAiServiceState;
+      const result = await pending;
+      if (probeGeneration === localAiProbeGeneration) {
+        localAiServiceState = result || localAiService.getState?.() || localAiServiceState;
+      }
     } catch (error) {
-      localAiServiceState = {
-        status: "error",
-        message: `本地 AI 检查失败：${error?.message || String(error)}`,
-        model: String(config.localAi?.model || ""),
-        lastCheckedAt: Date.now(),
-      };
+      if (probeGeneration === localAiProbeGeneration) {
+        localAiServiceState = {
+          status: "error",
+          message: `本地 AI 检查失败：${error?.message || String(error)}`,
+          model: String(config.localAi?.model || ""),
+          lastCheckedAt: Date.now(),
+        };
+      }
     }
     applyLocalAiServiceState();
     // 服务探测会更新 LocalAiClient.available；立即重取运行快照，避免 API/UI
@@ -2559,7 +2916,14 @@ function createWebApp({
       return runtime?.getSnapshot?.() || snapshot;
     }
     manualStopped = false;
-    if (browserControlDesired && browserControlReady() && body.forceSafe !== true) body.browserAuto = true;
+    if (
+      browserControlDesired &&
+      browserControlReady() &&
+      !browserStartAuthorizing &&
+      body.forceSafe !== true
+    ) {
+      body.browserAuto = true;
+    }
     const protectedStart = protectUnverifiedAutoSend(body || {});
     body = protectedStart.body;
     const requestedRoom = body.room || config.room;
@@ -2567,9 +2931,11 @@ function createWebApp({
     const currentRoomId = Number(runtime?.roomInfo?.roomId || roomIdFromValue(runtime?.room || ""));
     if (
       body.browserAuto === true &&
+      body.forceRestart !== true &&
       runtime?.running &&
       runtime.connected &&
       runtime.browserAuto &&
+      runtime.config?.automation?.enabled === true &&
       requestedRoomId &&
       requestedRoomId === currentRoomId
     ) {
@@ -2708,7 +3074,14 @@ function createWebApp({
     const room = browserControlRoom || config.room;
     const roomId = roomIdFromValue(room);
     const currentRoomId = Number(runtime?.roomInfo?.roomId || roomIdFromValue(runtime?.room || ""));
-    if (runtime?.running && runtime.browserAuto && roomId && roomId === currentRoomId) {
+    if (
+      runtime?.running &&
+      runtime.browserAuto &&
+      runtime.config?.automation?.enabled === true &&
+      runtime.isModuleEnabled?.("autoSend") === true &&
+      roomId &&
+      roomId === currentRoomId
+    ) {
       enqueueStartupMessageOnce(generation);
       ensureAutoLikeSchedule(true);
       syncBrowserControlSnapshot();
@@ -2768,7 +3141,21 @@ function createWebApp({
     return wrapped;
   }
 
-  async function startBrowserControl(body = {}) {
+  function startBrowserControl(body = {}) {
+    const stopEpochAtEnqueue = stopEpoch;
+    const next = browserControlStartChain.then(() =>
+      startBrowserControlInner(body, stopEpochAtEnqueue)
+    );
+    browserControlStartChain = next.catch(() => {});
+    return next;
+  }
+
+  async function startBrowserControlInner(body = {}, stopEpochAtEnqueue = stopEpoch) {
+    if (stopEpochAtEnqueue !== stopEpoch) {
+      const error = new Error("浏览器托管启动已被停止操作取消");
+      error.statusCode = 409;
+      throw error;
+    }
     const requestedValue = Object.prototype.hasOwnProperty.call(body, "room")
       ? body.room
       : browserControlRoom || config.room;
@@ -2781,6 +3168,7 @@ function createWebApp({
     // 链接合法后才检查 AI，并与 B 站页面启动并行：登录窗口不应
     // 因 Ollama 最长 15 秒的恢复轮询而迟迟不出现。
     const localAiReadyPromise = ensureLocalAiServiceReady();
+    const stopEpochAtStart = stopEpochAtEnqueue;
     const room = target.roomUrl;
     const previousDesired = browserControlDesired;
     const previousRoom = browserControlRoom;
@@ -2814,13 +3202,23 @@ function createWebApp({
     browserControlDesired = true;
     browserControlRoom = room;
     manualStopped = false;
+    browserStartAuthorizing = true;
     if (browserController.resetEmergencyStop && getBrowserControlState()?.emergencyStopped) {
       browserController.resetEmergencyStop();
     }
     try {
       await browserController.start({ room });
     } catch (error) {
+      browserStartAuthorizing = false;
       clearAutoLikeSchedule();
+      if (stopEpoch !== stopEpochAtStart || manualStopped || !browserControlDesired) {
+        await browserController.emergencyStop?.("已取消仍在启动的浏览器托管");
+        syncBrowserControlSnapshot();
+        broadcast("snapshot", snapshot);
+        const cancelled = new Error("浏览器托管启动已被停止操作取消");
+        cancelled.statusCode = 409;
+        throw cancelled;
+      }
       browserControlDesired = previousDesired;
       browserControlRoom = previousRoom;
       manualStopped = previousManualStopped;
@@ -2835,7 +3233,47 @@ function createWebApp({
       broadcast("snapshot", snapshot);
       throw error;
     }
-    persistManagedRoom(target);
+    if (
+      stopEpoch !== stopEpochAtStart ||
+      manualStopped ||
+      !browserControlDesired ||
+      browserControlRoom !== room
+    ) {
+      browserStartAuthorizing = false;
+      clearAutoLikeSchedule();
+      await browserController.emergencyStop?.("已取消仍在启动的浏览器托管");
+      syncBrowserControlSnapshot();
+      broadcast("snapshot", snapshot);
+      const error = new Error("浏览器托管启动已被停止操作取消");
+      error.statusCode = 409;
+      throw error;
+    }
+    let persistence;
+    try {
+      persistence = await enqueueConfigMutation(() => {
+        if (
+          stopEpoch !== stopEpochAtStart ||
+          manualStopped ||
+          !browserControlDesired ||
+          browserControlRoom !== room
+        ) {
+          const error = new Error("浏览器托管启动已被停止操作取消");
+          error.statusCode = 409;
+          throw error;
+        }
+        return persistManagedRoom(target);
+      });
+    } catch (error) {
+      browserStartAuthorizing = false;
+      if (error?.statusCode === 409) {
+        clearAutoLikeSchedule();
+        await browserController.emergencyStop?.("已取消仍在启动的浏览器托管");
+        syncBrowserControlSnapshot();
+        broadcast("snapshot", snapshot);
+      }
+      throw error;
+    }
+    browserStartAuthorizing = false;
     if (newBrowserSession) {
       resetAutoLikeSession(browserControlGeneration, nextRoomId);
     } else {
@@ -2855,6 +3293,8 @@ function createWebApp({
       state: getBrowserControlState(),
       snapshot,
       waitingLogin: !browserControlReady(),
+      persisted: persistence.persisted,
+      warning: persistence.warning,
     };
   }
 
@@ -2888,6 +3328,9 @@ function createWebApp({
 
   function handleBrowserControlReady() {
     handleBrowserControlState();
+    // BrowserController.start() 复用已登录持久会话时会在返回前同步发 ready。
+    // 必须等用户本次显式授权先落盘，再统一建立托管 runtime。
+    if (browserStartAuthorizing) return;
     ensureBrowserAutoRuntime("检测到网页登录，自动启动托管")
       .then(() => {
         ensureAutoLikeSchedule(true);
@@ -3098,8 +3541,10 @@ function createWebApp({
 
       if (req.method === "POST" && url.pathname === "/api/config") {
         const body = await readJsonBody(req);
-        applyAndPersistEditableConfig(body.config || body);
-        const restarted = body.restart !== false ? await restartRuntimeAfterConfigSave() : false;
+        const restarted = await enqueueConfigMutation(async () => {
+          applyAndPersistEditableConfig(body.config || body);
+          return body.restart !== false ? restartRuntimeAfterConfigSave() : false;
+        });
         sendJson(res, 200, {
           ok: true,
           restarted,
@@ -3107,6 +3552,14 @@ function createWebApp({
           configPath: config.__path,
           snapshot,
         });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/features") {
+        const body = await readJsonBody(req);
+        const name = String(body.name || "").trim();
+        const result = await applyFeatureSetting(name, body.enabled !== false);
+        sendJson(res, 200, result);
         return;
       }
 
@@ -3611,36 +4064,29 @@ function createWebApp({
           sendJson(res, 400, { error: "缺少模块名" });
           return;
         }
-        config.modules = config.modules || {};
-        config.modules[name] = {
-          ...(config.modules[name] || {}),
-          enabled: body.enabled !== false,
-        };
-        // 主播在页面上关掉的功能要在重启后保持，落盘失败不阻塞本次开关。
-        try {
-          saveConfigFile();
-        } catch (error) {
-          runtime?.log?.("配置", `模块开关未能写入配置文件：${error.message || error}`, { level: "warn" });
-        }
-        if (runtime) {
-          runtime.setModule(name, body.enabled !== false);
-          snapshot = runtime.getSnapshot();
-        } else {
-          snapshot = {
-            ...snapshot,
-            moduleStatus: {
-              ...(snapshot.moduleStatus || config.modules || {}),
-              [name]: config.modules[name],
-            },
-          };
-          broadcast("snapshot", snapshot);
-        }
-        if (name === "autoLike") {
-          if (body.enabled === false) clearAutoLikeSchedule();
-          else ensureAutoLikeSchedule(true);
+        await enqueueConfigMutation(async () => {
+          const draft = clonePlain(config);
+          draft.__path = config.__path;
+          draft.__source = config.__source;
+          draft.modules = draft.modules || {};
+          setNestedEnabled(draft.modules, name, body.enabled !== false);
+          commitConfigDraft(draft);
+          if (runtime) {
+            runtime.setModule(name, body.enabled !== false);
+            snapshot = runtime.getSnapshot();
+          } else {
+            snapshot = {
+              ...snapshot,
+              moduleStatus: clonePlain(config.modules || {}),
+            };
+          }
+          if (name === "autoLike") {
+            if (body.enabled === false) clearAutoLikeSchedule();
+            else ensureAutoLikeSchedule(true);
+          }
           syncBrowserControlSnapshot();
           broadcast("snapshot", snapshot);
-        }
+        });
         sendJson(res, 200, { ok: true, snapshot });
         return;
       }
@@ -3863,14 +4309,6 @@ async function main() {
     );
   }
 
-  // 兜底进程级异常：机器人是长跑服务，单个连接的意外错误不允许带崩整个进程。
-  process.on("uncaughtException", (error) => {
-    logger.error("process", `未捕获异常：${error?.stack || error?.message || error}`);
-  });
-  process.on("unhandledRejection", (reason) => {
-    logger.error("process", `未处理的 Promise 拒绝：${reason?.stack || reason?.message || reason}`);
-  });
-
   const app = createWebApp({ rootDir, config });
   const server = http.createServer(app.handleRequest);
   const retentionTimer = startRetentionSchedule({
@@ -3908,6 +4346,32 @@ async function main() {
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+  const fatalExit = (label, error) => {
+    const detail = error?.stack || error?.message || String(error);
+    logger.error("process", `${label}：${detail}`);
+    if (shuttingDown) {
+      process.exitCode = 1;
+      return;
+    }
+    shuttingDown = true;
+    process.exitCode = 1;
+    clearInterval(retentionTimer);
+    const forceExit = setTimeout(() => process.exit(1), 3000);
+    forceExit.unref();
+    Promise.resolve(app.stop())
+      .catch((stopError) => {
+        logger.error("process", `致命异常后清理失败：${stopError?.message || stopError}`);
+      })
+      .finally(() => {
+        server.closeAllConnections?.();
+        logger.close();
+        process.exit(1);
+      });
+  };
+  process.on("uncaughtException", (error) => fatalExit("未捕获异常", error));
+  process.on("unhandledRejection", (reason) => fatalExit("未处理的 Promise 拒绝", reason));
+  server.on("error", (error) => fatalExit("Web 服务器错误", error));
 
   server.listen(port, host, () => {
     logger.info(

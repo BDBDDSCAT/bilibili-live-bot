@@ -21,7 +21,7 @@
     "check": "npm test && npm run verify && npm run public:audit",
     "public:audit": "node scripts/audit-public-release.js",
     "public:export": "node scripts/export-public-release.js",
-    "test": "node --test scripts/test-config-loader.js scripts/test-logger-retention.js scripts/test-browser-controller.js scripts/test-local-ai-client.js scripts/test-local-ai-service.js scripts/test-weather-context.js scripts/test-proactive-ai.js scripts/test-auto-like-budget-store.js scripts/test-room-persistence.js scripts/test-gift-corrections.js",
+    "test": "node --test scripts/test-config-loader.js scripts/test-logger-retention.js scripts/test-browser-controller.js scripts/test-local-ai-client.js scripts/test-local-ai-service.js scripts/test-weather-context.js scripts/test-proactive-ai.js scripts/test-auto-like-budget-store.js scripts/test-room-persistence.js scripts/test-gift-corrections.js scripts/test-feature-api.js scripts/test-web-server-process.js",
     "test:browser-controller": "node --test scripts/test-browser-controller.js",
     "test:local-ai": "node --test scripts/test-local-ai-client.js",
     "test:local-ai-service": "node --test scripts/test-local-ai-service.js",
@@ -35,9 +35,9 @@
     "correct:gifts": "node scripts/apply-manual-gift-corrections.js"
   },
   "dependencies": {
-    "playwright-core": "^1.61.1",
+    "playwright-core": "1.62.1",
+    "pngjs": "^7.0.0",
     "qrcode": "^1.5.4",
-    "ws": "^8.21.0",
-    "pngjs": "^7.0.0"
+    "ws": "8.21.3"
   }
 }
