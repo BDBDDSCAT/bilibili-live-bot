@@ -19,7 +19,7 @@
 要求：Node.js 20 或更高版本。浏览器托管需要 Google Chrome；AI 需要 [Ollama](https://ollama.com) 和本地模型。
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/BDBDDSCAT/bilibili-live-bot.git
 cd bilibili-live-bot
 npm ci
 npm run setup -- --room 你的房间号
@@ -32,14 +32,14 @@ npm start
 ollama pull qwen3.5:4b
 ```
 
-然后在本地 `config.json` 或控制台中开启对应功能。不要提交 `config.json`。
+然后在控制台中开启“弹幕 / AI 互动”。页面功能开关会一次性持久化它依赖的后端配置；配置校验或写盘失败时不会留下半开状态。不要提交 `config.json`。
 
 ## 日常使用
 
 1. 运行 `npm start`，或在 macOS 上执行 `npm run service:install` 安装常驻服务。
 2. 打开控制台，填写或切换直播间。
 3. 只需要记录数据时保持默认设置。
-4. 需要发送时，明确开启浏览器托管、发送总开关及所需模块，并在弹出的 Chrome 中登录。
+4. 需要发送时，点“打开 B站并登录”；这一次明确操作会授权当前浏览器托管，实际动作仍受登录、目标房间、开播状态和各功能开关限制。
 5. OBS 挂件可从控制台复制浏览器源地址或导出透明文件。
 
 停止常驻服务：`npm run service:uninstall`；查看状态：`npm run service:status`。

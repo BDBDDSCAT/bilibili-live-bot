@@ -154,6 +154,40 @@ test("本地 AI 禁用时 skipped，不探测也不启动", async () => {
   assert.strictEqual(touched, false);
 });
 
+test("reconfigure 会让原本禁用的 AI 立即按新配置探测", async () => {
+  let fetchCount = 0;
+  const service = new LocalAiService(enabledConfig({ enabled: false }), {
+    fetch: async () => {
+      fetchCount += 1;
+      return jsonResponse({ models: [{ name: "qwen3.5:4b" }] });
+    },
+  });
+
+  assert.strictEqual((await service.ensureReady()).status, "skipped");
+  assert.strictEqual(fetchCount, 0);
+  assert.strictEqual(service.reconfigure(enabledConfig()).status, "idle");
+  assert.strictEqual((await service.ensureReady()).status, "ready");
+  assert.strictEqual(fetchCount, 1);
+});
+
+test("reconfigure 禁用 AI 后，旧的飞行中 ready 结果不能覆盖新状态", async () => {
+  let releaseProbe;
+  const probe = new Promise((resolve) => {
+    releaseProbe = resolve;
+  });
+  const service = new LocalAiService(enabledConfig(), {
+    fetch: async () => probe,
+  });
+
+  const staleCheck = service.ensureReady();
+  assert.strictEqual(service.getState().status, "checking");
+  assert.strictEqual(service.reconfigure(enabledConfig({ enabled: false })).status, "skipped");
+  releaseProbe(jsonResponse({ models: [{ name: "qwen3.5:4b" }] }));
+  await staleCheck;
+  assert.strictEqual(service.getState().status, "skipped");
+  assert.match(service.getState().message, /未启用/);
+});
+
 test("非 Ollama provider 不进入自动恢复", async () => {
   let touched = false;
   const service = new LocalAiService(enabledConfig({ provider: "openai-compatible" }), {

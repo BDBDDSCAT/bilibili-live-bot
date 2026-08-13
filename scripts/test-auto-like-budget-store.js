@@ -83,3 +83,78 @@ test("budgets are isolated by room so switching away and back cannot reset the d
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
 });
+
+test("semantic corruption fails closed instead of issuing a fresh daily budget", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "auto-like-budget-"));
+  const now = () => new Date(2026, 7, 13, 12, 0, 0);
+  try {
+    const filePath = path.join(stateDir, "snapshots", "auto-like-budget.json");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        version: 1,
+        budgets: {
+          "2026-08-13:20002": {
+            roomId: 20002,
+            day: "2026-08-13",
+            targetClicks: "BROKEN",
+            successfulClicks: 9000,
+            limitReached: false,
+            updatedAt: Date.now(),
+          },
+        },
+      })}\n`,
+      "utf8"
+    );
+
+    const store = new AutoLikeBudgetStore({ stateDir, now });
+    assert.throws(() => store.load(20002), /自动点赞预算文件损坏/);
+    assert.throws(
+      () =>
+        store.save({
+          roomId: 20002,
+          day: "2026-08-13",
+          targetClicks: 15000,
+          successfulClicks: 0,
+        }),
+      /自动点赞预算文件损坏/
+    );
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    assert.equal(persisted.budgets["2026-08-13:20002"].successfulClicks, 9000);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("budget map keys must match their room and day so a current-room cap cannot disappear", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "auto-like-budget-"));
+  const now = () => new Date(2026, 7, 13, 12, 0, 0);
+  try {
+    const filePath = path.join(stateDir, "snapshots", "auto-like-budget.json");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        version: 1,
+        budgets: {
+          "2026-08-13:20002": {
+            roomId: 30003,
+            day: "2026-08-13",
+            targetClicks: 12000,
+            successfulClicks: 9000,
+            limitReached: false,
+            updatedAt: Date.now(),
+          },
+        },
+      })}\n`,
+      "utf8"
+    );
+
+    const store = new AutoLikeBudgetStore({ stateDir, now });
+    assert.throws(() => store.load(20002), /与内容不一致/);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});

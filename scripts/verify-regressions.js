@@ -347,10 +347,10 @@ function verifyUiDefaults() {
     assert(indexHtml.includes(`id="${id}"`), `anchor workbench should expose ${id}`);
   }
 
-  const moduleMappings = [...indexHtml.matchAll(/data-modules="([^"]+)"/g)].map((match) => match[1]);
-  assert(moduleMappings.length === 6, `anchor workbench should expose exactly six feature switches, got ${moduleMappings.length}`);
-  for (const mapping of ["welcome", "autoLike", "giftThanks,guardBoard", "ai", "pk", "rotation"]) {
-    assert(moduleMappings.includes(mapping), `anchor workbench should expose module switch ${mapping}`);
+  const featureMappings = [...indexHtml.matchAll(/data-feature="([^"]+)"/g)].map((match) => match[1]);
+  assert(featureMappings.length === 6, `anchor workbench should expose exactly six feature switches, got ${featureMappings.length}`);
+  for (const mapping of ["welcome", "autoLike", "giftThanks", "ai", "pk", "rotation"]) {
+    assert(featureMappings.includes(mapping), `anchor workbench should expose feature switch ${mapping}`);
   }
 
   for (const endpoint of [
@@ -358,7 +358,7 @@ function verifyUiDefaults() {
     "/api/browser-control/start",
     "/api/browser-control/stop",
     "/api/local-ai/start",
-    "/api/modules",
+    "/api/features",
     "/api/events",
   ]) {
     assert(appJs.includes(endpoint), `anchor workbench should use ${endpoint}`);
@@ -368,9 +368,18 @@ function verifyUiDefaults() {
     "/api/browser-control/start",
     "/api/browser-control/stop",
     "/api/local-ai/start",
+    "/api/features",
   ]) {
     assert(webServerJs.includes(`url.pathname === "${endpoint}"`), `backend should expose ${endpoint}`);
   }
+  assert(
+    appJs.includes("roomPersistenceWarning"),
+    "room persistence warnings must survive background control refreshes"
+  );
+  assert(
+    appJs.includes('likeSchedule.budgetHealthy === false'),
+    "auto-like budget failures must be visible in the streamer UI"
+  );
   // 前端不许再调用旧控制台时代的端点（端点存在性是结构契约，不属于文案）。
   for (const legacyEndpoint of [
     "/api/self-test",
@@ -3491,6 +3500,78 @@ async function verifyBrowserControlApiAutoStart() {
     return this.getSnapshot();
   };
 
+  // 已登录的持久 Chrome 会在 start() 返回前发 ready。用户这次点击的
+  // 授权必须先落盘，否则 ready 回调会按旧的 automation=false 启动假托管。
+  {
+    class ImmediateReadyBrowser extends FakeBrowserController {
+      constructor(roomId) {
+        super(roomId);
+        this.state = {
+          ...this.state,
+          status: "ready",
+          running: true,
+          ready: true,
+          loggedIn: true,
+        };
+      }
+
+      async start(options = {}) {
+        const state = await super.start(options);
+        this.emit("ready", this.getState());
+        return state;
+      }
+    }
+
+    const immediateConfigPath = path.join(TMP_ROOT, "verify-immediate-ready-config.json");
+    const immediateStateDir = path.join(TMP_ROOT, "verify-immediate-ready-state");
+    const immediateConfig = deepMergeConfig(DEFAULT_CONFIG, {
+      room: "https://live.bilibili.com/20002",
+      connection: { autoStartSafe: false },
+      history: { enabled: false, dir: immediateStateDir },
+      browserAutomation: { enabled: false, autoLike: { enabled: false } },
+      automation: { enabled: false },
+      modules: { autoSend: { enabled: false } },
+      localAi: { enabled: false },
+    });
+    fs.writeFileSync(immediateConfigPath, `${JSON.stringify(immediateConfig, null, 2)}\n`, "utf8");
+    immediateConfig.__path = immediateConfigPath;
+    immediateConfig.__source = "config.json";
+    const immediateApp = createWebApp({
+      rootDir,
+      config: immediateConfig,
+      browserController: new ImmediateReadyBrowser(20002),
+    });
+    const immediateServer = http.createServer(immediateApp.handleRequest);
+    await new Promise((resolve) => immediateServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${immediateServer.address().port}/api/browser-control/start`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room: immediateConfig.room }),
+        }
+      );
+      assert(response.status === 200, "already-signed-in browser start should succeed");
+      const startedRuntime = runtimeInstances.at(-1);
+      const persisted = JSON.parse(fs.readFileSync(immediateConfigPath, "utf8"));
+      assert(
+        startedRuntime?.config?.automation?.enabled === true &&
+          startedRuntime?.isModuleEnabled?.("autoSend") === true,
+        "already-signed-in browser must start only after current authorization reaches runtime"
+      );
+      assert(
+        persisted.automation?.enabled === true && persisted.modules?.autoSend?.enabled === true,
+        "already-signed-in authorization must be persisted before managed runtime starts"
+      );
+    } finally {
+      await immediateApp.stop();
+      await new Promise((resolve) => immediateServer.close(resolve));
+      runtimeStartCalls = 0;
+      runtimeInstances.length = 0;
+    }
+  }
+
   const config = {
     room: "https://live.bilibili.com/20002",
     dryRun: true,
@@ -3511,6 +3592,9 @@ async function verifyBrowserControlApiAutoStart() {
       },
     },
     history: { enabled: false, dir: path.join(TMP_ROOT, "verify-browser-control-api") },
+    // 本段专门验证“显式开启的兼容规则”也走同一浏览器发送链；
+    // 公开默认 fallbackToRules=false，不会发送这些固定模板。
+    localAi: { enabled: false, fallbackToRules: true },
     automation: {
       enabled: true,
       autoSendTypes: ["reply", "timer"],
@@ -3541,16 +3625,31 @@ async function verifyBrowserControlApiAutoStart() {
     ],
     interactions: { welcome: { enabled: true, requireFullName: false, cooldownSec: 0 } },
   };
+  const verifyConfigPath = path.join(TMP_ROOT, "verify-browser-control-api-config.json");
+  fs.mkdirSync(path.dirname(verifyConfigPath), { recursive: true });
+  fs.writeFileSync(verifyConfigPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  config.__path = verifyConfigPath;
+  config.__source = "config.json";
   const autoLikeRandomValues = [0, 0, 0, 0.999999999, 0.999999999, 0, 0, 0, 0, 0, 0];
   const verifyAutoLikeBudgetStore = new AutoLikeBudgetStore({
     stateDir: path.join(TMP_ROOT, "verify-browser-control-api"),
   });
   verifyAutoLikeBudgetStore.clear();
+  let failAutoLikeBudgetSaves = false;
+  const guardedAutoLikeBudgetStore = {
+    currentDay: (...args) => verifyAutoLikeBudgetStore.currentDay(...args),
+    load: (...args) => verifyAutoLikeBudgetStore.load(...args),
+    save: (...args) => {
+      if (failAutoLikeBudgetSaves) throw new Error("模拟点赞预算写盘失败");
+      return verifyAutoLikeBudgetStore.save(...args);
+    },
+    clear: (...args) => verifyAutoLikeBudgetStore.clear(...args),
+  };
   const app = createWebApp({
     rootDir,
     config,
     browserController: fakeBrowser,
-    autoLikeBudgetStore: verifyAutoLikeBudgetStore,
+    autoLikeBudgetStore: guardedAutoLikeBudgetStore,
     randomFn: () => autoLikeRandomValues.shift() ?? 0,
   });
   const server = http.createServer(app.handleRequest);
@@ -3605,14 +3704,14 @@ async function verifyBrowserControlApiAutoStart() {
       "offline room must not send the proactive startup message"
     );
     fakeLiveStatus = 1;
-    runtimeInstances[0].handleGenericEvent({
+    runtimeInstances.at(-1).handleGenericEvent({
       eventKind: "live_status",
       command: "LIVE",
       liveStatus: 1,
       roomId: 20002,
       text: "开播",
     });
-    runtimeInstances[0].emitSnapshot();
+    runtimeInstances.at(-1).emitSnapshot();
     const liveReadyState = await waitForCondition(async () => {
       const current = await get("/api/browser-control/state");
       return current.snapshot?.autoLikeSchedule?.active &&
@@ -3695,14 +3794,36 @@ async function verifyBrowserControlApiAutoStart() {
       "only successful browser clicks should advance the session total"
     );
 
-    runtimeInstances[0].handleGenericEvent({
+    failAutoLikeBudgetSaves = true;
+    const likeCountBeforeSaveFailure = fakeBrowser.likeCalls.length;
+    const failedBudgetState = await waitForCondition(async () => {
+      const current = await get("/api/browser-control/state");
+      return current.snapshot?.autoLikeSchedule?.budgetHealthy === false ? current : null;
+    }, "a failed write-ahead reservation should stop auto-like");
+    assert(
+      fakeBrowser.likeCalls.length === likeCountBeforeSaveFailure,
+      "budget reservation must persist before BrowserController.like is called"
+    );
+    assert(
+      failedBudgetState.snapshot.autoLikeSchedule.active === false,
+      "save failure must leave auto-like inactive"
+    );
+    failAutoLikeBudgetSaves = false;
+    await post("/api/features", { name: "autoLike", enabled: false });
+    await post("/api/features", { name: "autoLike", enabled: true });
+    await waitForCondition(
+      () => fakeBrowser.likeCalls.length > likeCountBeforeSaveFailure,
+      "a healthy explicit retry should resume from the last persisted budget"
+    );
+
+    runtimeInstances.at(-1).handleGenericEvent({
       eventKind: "live_status",
       command: "PREPARING",
       liveStatus: 0,
       roomId: 20002,
       text: "下播",
     });
-    runtimeInstances[0].emitSnapshot();
+    runtimeInstances.at(-1).emitSnapshot();
     const offlineLikeCount = fakeBrowser.likeCalls.length;
     await new Promise((resolve) => setTimeout(resolve, 140));
     assert(
@@ -3715,14 +3836,14 @@ async function verifyBrowserControlApiAutoStart() {
         offlineState.snapshot.autoLikeSchedule?.waitingForLive === true,
       "auto-like snapshot should expose offline waiting state"
     );
-    runtimeInstances[0].handleGenericEvent({
+    runtimeInstances.at(-1).handleGenericEvent({
       eventKind: "live_status",
       command: "LIVE",
       liveStatus: 1,
       roomId: 20002,
       text: "再次开播",
     });
-    runtimeInstances[0].emitSnapshot();
+    runtimeInstances.at(-1).emitSnapshot();
     await waitForCondition(
       () => fakeBrowser.likeCalls.length > offlineLikeCount,
       "LIVE event should resume auto-like after an offline pause"
@@ -3739,23 +3860,23 @@ async function verifyBrowserControlApiAutoStart() {
     );
     const delayedBurstCount = fakeBrowser.likeCalls.length;
     fakeLiveStatus = 0;
-    runtimeInstances[0].handleGenericEvent({
+    runtimeInstances.at(-1).handleGenericEvent({
       eventKind: "live_status",
       command: "PREPARING",
       liveStatus: 0,
       roomId: 20002,
       text: "快速下播",
     });
-    runtimeInstances[0].emitSnapshot();
+    runtimeInstances.at(-1).emitSnapshot();
     fakeLiveStatus = 1;
-    runtimeInstances[0].handleGenericEvent({
+    runtimeInstances.at(-1).handleGenericEvent({
       eventKind: "live_status",
       command: "LIVE",
       liveStatus: 1,
       roomId: 20002,
       text: "快速恢复开播",
     });
-    runtimeInstances[0].emitSnapshot();
+    runtimeInstances.at(-1).emitSnapshot();
     releaseLikeBarrier();
     fakeBrowser.likeBarrier = null;
     await waitForCondition(
@@ -3763,12 +3884,12 @@ async function verifyBrowserControlApiAutoStart() {
       "rapid PREPARING-to-LIVE transition should resume after the old burst settles"
     );
 
-    await post("/api/modules", { name: "autoLike", enabled: false });
+    await post("/api/features", { name: "autoLike", enabled: false });
     const disabledLikeCount = fakeBrowser.likeCalls.length;
     await new Promise((resolve) => setTimeout(resolve, 140));
     assert(fakeBrowser.likeCalls.length === disabledLikeCount, "disabling autoLike must cancel its pending timeout");
 
-    await post("/api/modules", { name: "autoLike", enabled: true });
+    await post("/api/features", { name: "autoLike", enabled: true });
     await waitForCondition(
       () => fakeBrowser.likeCalls.length > disabledLikeCount,
       "re-enabling autoLike should schedule one new initial click"
@@ -3801,6 +3922,7 @@ async function verifyBrowserControlApiAutoStart() {
     config.browserAutomation.autoLike.burstMinClicks = 10;
     config.browserAutomation.autoLike.burstMaxClicks = 10;
     const restartLikeStart = fakeBrowser.likeCalls.length;
+    const runtimeStartsBeforeFullRestart = runtimeStartCalls;
     const restarted = await post("/api/browser-control/start", { room: config.room });
     assert(restarted.ok && restarted.waitingLogin === true, "browser control should return to login wait after a full stop");
     fakeBrowser.makeReady();
@@ -3808,7 +3930,10 @@ async function verifyBrowserControlApiAutoStart() {
       () => fakeBrowser.sendCalls.filter((item) => item.text === "机器人上线回归").length === 2,
       "a new browser-control generation should enqueue one new startup message"
     );
-    assert(runtimeStartCalls === 2, "a full stop and restart should create one new managed runtime");
+    assert(
+      runtimeStartCalls === runtimeStartsBeforeFullRestart + 1,
+      "a full stop and restart should create one new managed runtime"
+    );
     const limitedState = await waitForCondition(async () => {
       const current = await get("/api/browser-control/state");
       return current.snapshot?.autoLikeSchedule?.limitReached ? current : null;
@@ -3851,11 +3976,16 @@ async function verifyBrowserControlApiAutoStart() {
     );
 
     const roomB = "https://live.bilibili.com/20003";
+    const runtimeStartsBeforeSwitch = runtimeStartCalls;
+    const roomARuntime = runtimeInstances.at(-1);
     const switched = await post("/api/browser-control/start", { room: "20003" });
     assert(switched.ok && switched.state?.roomId === 20003, "room switch should move browser state to B");
     assert(switched.snapshot?.room?.roomId === 20003, "room switch should rebuild runtime for B");
-    assert(runtimeStartCalls === 3, "A to B should construct exactly one new managed runtime");
-    assert(runtimeInstances[2] !== runtimeInstances[1], "room B must not reuse room A runtime instance");
+    assert(
+      runtimeStartCalls === runtimeStartsBeforeSwitch + 1,
+      "A to B should construct exactly one new managed runtime"
+    );
+    assert(runtimeInstances.at(-1) !== roomARuntime, "room B must not reuse room A runtime instance");
     assert(
       switched.snapshot?.localAiMemory?.viewerCount === 0 &&
         switched.snapshot?.localAiMemory?.turnCount === 0 &&
@@ -3866,7 +3996,10 @@ async function verifyBrowserControlApiAutoStart() {
 
     const sameRoom = await post("/api/browser-control/start", { room: roomB });
     assert(sameRoom.ok && fakeBrowser.roomSwitchCount === 1, "starting B again must not switch twice");
-    assert(runtimeStartCalls === 3, "starting B again must keep the existing B runtime");
+    assert(
+      runtimeStartCalls === runtimeStartsBeforeSwitch + 1,
+      "starting B again must keep the existing B runtime"
+    );
     await post("/api/browser-control/stop", { reason: "回归结束" });
   } finally {
     await app.stop();

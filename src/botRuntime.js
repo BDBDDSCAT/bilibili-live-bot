@@ -1462,8 +1462,7 @@ class BotRuntime extends EventEmitter {
 
   activeOutboundLiveEligible(action = {}) {
     const proactiveAi = action.metadata?.proactiveAi === true;
-    const activeTimer = String(action.type || "") === "timer";
-    if (!proactiveAi && !activeTimer && action.ruleName !== "startup_message") return true;
+    if (action.ruleName === "manual_send" || action.type === "manual_send") return true;
     if (proactiveAi && this.proactiveAiConfig().onlyWhenLive === false) return true;
     return Number(this.roomInfo?.liveStatus ?? -1) === 1;
   }
@@ -4182,7 +4181,7 @@ class BotRuntime extends EventEmitter {
     }
     if (!this.roomInfo?.roomId) return { ok: false, reason: "还没有房间号" };
     if (!this.activeOutboundLiveEligible(action)) {
-      return { ok: false, reason: "直播间未开播，主动发言等待开播" };
+      return { ok: false, reason: "直播间未开播，自动互动等待开播" };
     }
 
     const allowedTypes = new Set(
@@ -4511,8 +4510,12 @@ class BotRuntime extends EventEmitter {
         this.handleAction(this.createGiftReportAction(action.metadata || action), event);
       } else if (action.type === "pk_report") {
         this.handleAction(this.pkTracker.createReportAction(), event);
-      } else {
+      } else if (this.config.localAi?.fallbackToRules === true) {
+        // 普通固定话术是显式兼容模式；默认直播互动只交给 Qwen，
+        // Qwen 关闭或失败时绝不悄悄发送“你好/扣1/666”等模板。
         this.handleAction(action, event);
+      } else {
+        this.log("固定话术", `规则 ${action.ruleName || "未命名"} 已跳过（fallbackToRules 未开启）`);
       }
     }
   }
@@ -5427,6 +5430,12 @@ class BotRuntime extends EventEmitter {
         this.handleLocalAiAction(action, event).catch((error) => {
           this.log("本地AI", error.message || String(error), { level: "warn" });
         });
+      } else if (action?.ruleName === "ai") {
+        this.log(
+          "本地AI",
+          "本地 Qwen 未启用或 AI 模块未开启；已放弃观众 AI 动作，未发送固定话术",
+          { level: "warn" }
+        );
       } else {
         this.handleAction(action, event);
       }
@@ -5880,7 +5889,7 @@ class BotRuntime extends EventEmitter {
     if (!this.activeOutboundLiveEligible(action)) {
       return {
         ok: false,
-        error: "直播间未开播，主动发言等待开播",
+        error: "直播间未开播，自动互动等待开播",
       };
     }
     const finalText = await this.prepareBiliOutboundText(action);
@@ -5941,7 +5950,7 @@ class BotRuntime extends EventEmitter {
     if (!this.activeOutboundLiveEligible(action)) {
       return {
         ok: false,
-        error: "直播间未开播，主动发言等待开播",
+        error: "直播间未开播，自动互动等待开播",
       };
     }
 

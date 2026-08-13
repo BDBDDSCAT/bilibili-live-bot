@@ -89,6 +89,55 @@ test("普通观众弹幕优先交给 Qwen，不发送旧关键词固定话术", 
   runtime.stop("测试结束");
 });
 
+test("Qwen 未启用时普通观众 AI 动作 fail-closed，不发送固定模板", () => {
+  const { runtime } = makeRuntime();
+  runtime.localAiClient = {
+    getState: () => ({ enabled: false, available: false, model: "qwen-test" }),
+  };
+  const logs = [];
+  let handleActionCalls = 0;
+  runtime.log = (...args) => logs.push(args);
+  runtime.handleAction = () => {
+    handleActionCalls += 1;
+  };
+
+  runtime.handleActions(
+    [{ type: "command_reply", ruleName: "ai", reply: "固定模板不应发送" }],
+    { userName: "小明", text: "东京多少度" }
+  );
+
+  assert.equal(handleActionCalls, 0);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][0], "本地AI");
+  assert.match(logs[0][1], /已放弃观众 AI 动作/);
+  assert.match(logs[0][1], /未发送固定话术/);
+  assert.deepEqual(logs[0][2], { level: "warn" });
+  runtime.stop("测试结束");
+});
+
+test("公开默认不会绕过 AI 开关发送你好、扣1或666固定话术", () => {
+  const { runtime } = makeRuntime({
+    localAi: { enabled: false, allViewerChats: false, fallbackToRules: false },
+    modules: { ai: { enabled: false }, autoSend: { enabled: true } },
+    rules: [
+      { name: "greeting", enabled: true, keywords: ["你好"], reply: "固定问候" },
+      { name: "deduction_one", enabled: true, matchMode: "exact", keywords: ["扣1"], reply: "固定扣1" },
+      { name: "six_reaction", enabled: true, matchMode: "exact", keywords: ["666"], reply: "固定666" },
+    ],
+  });
+  let handleActionCalls = 0;
+  runtime.handleAction = () => {
+    handleActionCalls += 1;
+  };
+
+  for (const text of ["你好", "扣1", "666"]) {
+    runtime.handleIncomingChat({ userName: "观众", displayUserName: "观众", text });
+  }
+
+  assert.equal(handleActionCalls, 0);
+  runtime.stop("测试结束");
+});
+
 test("网页公屏会去掉粉丝牌前缀，只把观众正文交给 Qwen", async () => {
   const { runtime, modelCalls } = makeRuntime();
   const actions = [];
@@ -189,6 +238,22 @@ test("默认只在开播后启动主动 Qwen，下播立即暂停", async () => 
   assert.equal(
     runtime.shouldAutoSend({ type: "timer", ruleName: "startup_message", reply: "离线上线提示" }).ok,
     false
+  );
+  const viewerReply = {
+    type: "command_reply",
+    ruleName: "ai",
+    reply: "@观众 下播后也不应自动回复",
+    metadata: { localAi: true },
+  };
+  assert.equal(runtime.shouldAutoSend(viewerReply).ok, false);
+  assert.match(runtime.shouldAutoSend(viewerReply).reason, /未开播/);
+  assert.equal(
+    runtime.activeOutboundLiveEligible({
+      type: "manual_send",
+      ruleName: "manual_send",
+      reply: "主播手动发送仍可用",
+    }),
+    true
   );
 
   runtime.handleGenericEvent({

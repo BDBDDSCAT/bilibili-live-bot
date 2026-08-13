@@ -268,7 +268,7 @@
   "rules": [
     {
       "name": "greeting",
-      "enabled": true,
+      "enabled": false,
       "priority": 50,
       "keywords": [
         "你好",
@@ -282,7 +282,7 @@
     },
     {
       "name": "deduction_one",
-      "enabled": true,
+      "enabled": false,
       "priority": 70,
       "matchMode": "exact",
       "keywords": [
@@ -300,7 +300,7 @@
     },
     {
       "name": "six_reaction",
-      "enabled": true,
+      "enabled": false,
       "priority": 60,
       "matchMode": "exact",
       "keywords": [

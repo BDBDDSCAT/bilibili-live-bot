@@ -11,17 +11,63 @@ function makeTempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "bilibot-config-"));
 }
 
+function assertSafeDefaults(config) {
+  assert.strictEqual(config.dryRun, true);
+  assert.strictEqual(config.send.enabled, false);
+  assert.strictEqual(config.browserAutomation.enabled, false);
+  assert.strictEqual(config.browserAutomation.autoLike.enabled, false);
+  assert.strictEqual(config.browserAutomation.autoLike.onlyWhenLive, true);
+  assert.strictEqual(config.modules.autoSend.enabled, false);
+  assert.strictEqual(config.modules.autoLike.enabled, false);
+  assert.strictEqual(config.modules.ai.enabled, false);
+  assert.strictEqual(config.modules.rotation.enabled, false);
+  assert.strictEqual(config.automation.enabled, false);
+  assert.strictEqual(config.localAi.enabled, false);
+  assert.strictEqual(config.localAi.proactive.enabled, false);
+}
+
 test("默认配置是安全的：不发送、不点赞、不接管浏览器", () => {
-  assert.strictEqual(DEFAULT_CONFIG.dryRun, true);
-  assert.strictEqual(DEFAULT_CONFIG.send.enabled, false);
-  assert.strictEqual(DEFAULT_CONFIG.browserAutomation.enabled, false);
-  assert.strictEqual(DEFAULT_CONFIG.browserAutomation.autoLike.enabled, false);
-  assert.strictEqual(DEFAULT_CONFIG.browserAutomation.autoLike.onlyWhenLive, true);
-  assert.strictEqual(DEFAULT_CONFIG.modules.autoSend.enabled, false);
+  assertSafeDefaults(DEFAULT_CONFIG);
   assert.strictEqual(DEFAULT_CONFIG.localAi.autoStart, true);
   assert.strictEqual(DEFAULT_CONFIG.localAi.startupTimeoutMs, 15000);
   assert.strictEqual(DEFAULT_CONFIG.localAi.proactive.onlyWhenLive, true);
   assert.strictEqual(DEFAULT_CONFIG.room, "");
+});
+
+test("公开配置模板默认不启用普通固定话术", () => {
+  const template = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, "..", "config.example.json"), "utf8")
+  );
+  assert.strictEqual(template.localAi.fallbackToRules, false);
+  for (const name of ["greeting", "deduction_one", "six_reaction"]) {
+    const rule = template.rules.find((item) => item.name === name);
+    assert.ok(rule, `公开模板应保留可选规则 ${name}`);
+    assert.strictEqual(rule.enabled, false, `公开模板不得默认开启 ${name}`);
+  }
+});
+
+test("空配置文件不会隐式开启发送、点赞、AI 或主动聊天", () => {
+  const root = makeTempRoot();
+  try {
+    fs.writeFileSync(path.join(root, "config.json"), "{}");
+    const config = loadConfig({ rootDir: root });
+    assertSafeDefaults(config);
+    assert.strictEqual(config.room, "");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("仅有 room 的旧配置不会继承危险功能开关", () => {
+  const root = makeTempRoot();
+  try {
+    fs.writeFileSync(path.join(root, "config.json"), JSON.stringify({ room: "1985118453" }));
+    const config = loadConfig({ rootDir: root });
+    assertSafeDefaults(config);
+    assert.strictEqual(config.room, "1985118453");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("deepMerge 深合并对象、整体替换数组", () => {

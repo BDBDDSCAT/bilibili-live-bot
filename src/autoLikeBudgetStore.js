@@ -9,23 +9,58 @@ function localDayKey(value = new Date()) {
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
 }
 
+function finiteInteger(value, fallback = null) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) && Number.isInteger(number) ? number : null;
+}
+
+function validLocalDay(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
 function normalizeBudget(value) {
   if (!value || typeof value !== "object") return null;
-  const roomId = Math.max(0, Math.floor(Number(value.roomId) || 0));
+  const roomId = finiteInteger(value.roomId, 0);
   const day = String(value.day || "").trim();
-  const targetClicks = Math.floor(Number(value.targetClicks) || 0);
+  const targetClicks = finiteInteger(value.targetClicks, 0);
+  const rawSuccessfulClicks = finiteInteger(value.successfulClicks, 0);
+  const updatedAt = finiteInteger(value.updatedAt, 0);
+  if (
+    !roomId ||
+    roomId < 0 ||
+    !validLocalDay(day) ||
+    !targetClicks ||
+    targetClicks < 0 ||
+    rawSuccessfulClicks === null ||
+    rawSuccessfulClicks < 0 ||
+    updatedAt === null ||
+    updatedAt < 0 ||
+    (value.limitReached !== undefined && typeof value.limitReached !== "boolean")
+  ) {
+    return null;
+  }
   const successfulClicks = Math.min(
     targetClicks,
-    Math.max(0, Math.floor(Number(value.successfulClicks) || 0))
+    rawSuccessfulClicks
   );
-  if (!roomId || !/^\d{4}-\d{2}-\d{2}$/.test(day) || targetClicks <= 0) return null;
   return {
     roomId,
     day,
     targetClicks,
     successfulClicks,
     limitReached: Boolean(value.limitReached) || successfulClicks >= targetClicks,
-    updatedAt: Math.max(0, Math.floor(Number(value.updatedAt) || 0)),
+    updatedAt,
   };
 }
 
@@ -58,21 +93,37 @@ class AutoLikeBudgetStore {
     const legacy = normalizeBudget(parsed);
     if (legacy) return { [budgetKey(legacy.roomId, legacy.day)]: legacy };
 
-    const rows = parsed?.budgets && typeof parsed.budgets === "object" ? parsed.budgets : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("自动点赞预算文件损坏：根节点格式无效");
+    }
+    if (!Object.prototype.hasOwnProperty.call(parsed, "budgets")) {
+      throw new Error("自动点赞预算文件损坏：无法识别文件格式");
+    }
+    if (!parsed.budgets || typeof parsed.budgets !== "object" || Array.isArray(parsed.budgets)) {
+      throw new Error("自动点赞预算文件损坏：budgets 格式无效");
+    }
+    const rows = parsed.budgets;
     const result = {};
-    for (const value of Object.values(rows)) {
+    for (const [key, value] of Object.entries(rows)) {
       const budget = normalizeBudget(value);
-      if (budget) result[budgetKey(budget.roomId, budget.day)] = budget;
+      if (!budget) throw new Error(`自动点赞预算文件损坏：记录 ${key} 无效`);
+      const canonicalKey = budgetKey(budget.roomId, budget.day);
+      if (key !== canonicalKey) {
+        throw new Error(`自动点赞预算文件损坏：记录 ${key} 与内容不一致`);
+      }
+      result[canonicalKey] = budget;
     }
     return result;
   }
 
   writeBudgets(budgets = {}) {
-    const rows = Object.values(budgets)
-      .map(normalizeBudget)
-      .filter(Boolean)
-      .sort((left, right) => right.updatedAt - left.updatedAt)
-      .slice(0, 200);
+    const rows = Object.entries(budgets).map(([key, value]) => {
+      const budget = normalizeBudget(value);
+      if (!budget) throw new Error(`自动点赞预算内容无效：记录 ${key}`);
+      return budget;
+    });
+    rows.sort((left, right) => right.updatedAt - left.updatedAt);
+    rows.splice(200);
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const tempPath = `${this.filePath}.tmp-${process.pid}-${Date.now()}`;
     const payload = {
