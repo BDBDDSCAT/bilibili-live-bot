@@ -9,6 +9,11 @@ const { PNG } = require("pngjs");
 const { applyCorrections } = require("./apply-manual-gift-corrections");
 const { composeLongImage, generate, verifyAssetHashes, visibleRowRuns } = require("./generate-gift-long-image");
 
+function localAt(day, hour = 12, minute = 0, second = 0) {
+  const [year, month, date] = String(day).split("-").map(Number);
+  return new Date(year, month - 1, date, hour, minute, second, 0).getTime();
+}
+
 function fillRect(image, x, y, width, height, rgba) {
   for (let yy = y; yy < y + height; yy += 1) {
     for (let xx = x; xx < x + width; xx += 1) {
@@ -56,7 +61,7 @@ test("人工礼物校正可追溯且重复执行不会重复落盘", () => {
       events: [
         {
           id: "door-1",
-          at: new Date("2026-08-09T12:00:00+09:00").getTime(),
+          at: localAt("2026-08-09"),
           userId: 7,
           userName: "测试舰长",
           giftId: 35683,
@@ -69,7 +74,7 @@ test("人工礼物校正可追溯且重复执行不会重复落盘", () => {
       ],
       guardCorrections: [
         {
-          at: new Date("2026-08-09T12:00:00+09:00").getTime(),
+          at: localAt("2026-08-09"),
           userId: 7,
           userName: "测试舰长",
           guardLevel: 3,
@@ -146,7 +151,7 @@ test("用户确认的已下架活动礼物必须显式放行且使用事件级�
     events: [
       {
         id: "aibo-hucheng",
-        at: new Date("2026-08-10T01:24:57+09:00").getTime(),
+        at: localAt("2026-08-10", 1, 24, 57),
         userId: 9,
         userName: "测试提督",
         giftId: 35732,
@@ -196,8 +201,8 @@ test("校正文件有后续错误时不会部分落盘", () => {
       roomId: 123,
       day: "2026-08-09",
       events: [
-        { id: "good", at: new Date("2026-08-09T12:00:00+09:00").getTime(), userId: 1, userName: "A", giftId: 1, giftName: "正确礼物", count: 1 },
-        { id: "bad", at: new Date("2026-08-09T12:01:00+09:00").getTime(), userId: 2, userName: "B", giftId: 1, giftName: "错误名称", count: 1 },
+        { id: "good", at: localAt("2026-08-09"), userId: 1, userName: "A", giftId: 1, giftName: "正确礼物", count: 1 },
+        { id: "bad", at: localAt("2026-08-09", 12, 1), userId: 2, userName: "B", giftId: 1, giftName: "错误名称", count: 1 },
       ],
     })
   );
@@ -217,13 +222,13 @@ test("校正文件有后续错误时不会部分落盘", () => {
     assert.equal(fs.existsSync(path.join(stateDir, "events", "2026-08-09.jsonl")), false);
 
     invalid.events[0].count = 1;
-    invalid.events[0].at = new Date("2026-08-10T00:01:00+09:00").getTime();
+    invalid.events[0].at = localAt("2026-08-10", 0, 1);
     fs.writeFileSync(manifestPath, JSON.stringify(invalid));
     assert.throws(() => applyCorrections({ rootDir, stateDir, filePath: manifestPath }), /at 不属于 manifest\.day/);
     assert.equal(fs.existsSync(path.join(stateDir, "events", "2026-08-09.jsonl")), false);
     assert.equal(fs.existsSync(path.join(stateDir, "events", "2026-08-10.jsonl")), false);
 
-    invalid.events[0].at = new Date("2026-08-09T12:00:00+09:00").getTime();
+    invalid.events[0].at = localAt("2026-08-09");
     invalid.guardCorrections = [
       { at: "abc", userId: 1, userName: "A", guardLevel: 3, guardName: "舰长" },
     ];
@@ -250,7 +255,7 @@ test("已有校正详细内容变更必须显式追加修订", () => {
     roomId: 123,
     day: "2026-08-09",
     evidence: { source: "user_confirmed", note: "v1" },
-    events: [{ id: "one", at: new Date("2026-08-09T12:00:00+09:00").getTime(), userId: 1, userName: "A", giftId: 1, giftName: "礼物", count: 1 }],
+    events: [{ id: "one", at: localAt("2026-08-09"), userId: 1, userName: "A", giftId: 1, giftName: "礼物", count: 1 }],
   };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest));
   try {
