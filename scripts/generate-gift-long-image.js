@@ -223,9 +223,16 @@ async function loadPngSource(source = "", baseDir = process.cwd()) {
 function resolveChromeExecutable(preferred = "") {
   const candidates = [
     preferred,
+    process.env.CHROME_EXECUTABLE,
+    process.env.CHROME_PATH,
+    process.env.CHROMIUM_PATH,
     typeof chromium.executablePath === "function" ? chromium.executablePath() : "",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
