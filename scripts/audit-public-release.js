@@ -19,7 +19,7 @@ const forbiddenPaths = [
 ];
 const textExtensions = new Set([
   "", ".cjs", ".css", ".html", ".ini", ".js", ".json", ".jsonl", ".md",
-  ".mjs", ".sh", ".toml", ".txt", ".yaml", ".yml",
+  ".cmd", ".mjs", ".ps1", ".sh", ".toml", ".txt", ".yaml", ".yml",
 ]);
 const secretPatterns = [
   { label: "Bilibili Cookie", regex: /\b(?:SESSDATA|bili_jct|DedeUserID)\s*[:=]\s*["']?[A-Za-z0-9_%.-]{16,}/g },

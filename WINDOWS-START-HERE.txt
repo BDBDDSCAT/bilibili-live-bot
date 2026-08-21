@@ -1,0 +1,11 @@
+Windows 迁移包使用顺序
+
+1. 先把整个 Bilibili-Live-Bot-Windows-* 文件夹从 U 盘复制到 Windows 本机磁盘。
+2. 双击 WINDOWS-4-VERIFY.cmd，确认文件没有损坏。
+3. 双击 WINDOWS-1-SETUP.cmd，离线安装项目依赖并运行检查。
+4. 双击 WINDOWS-2-START.cmd，页面会自动打开。
+5. 在页面中点“打开 B站并登录”，Windows 上需要重新登录一次。
+6. 需要 Qwen 时，先安装 Ollama，再双击 WINDOWS-3-INSTALL-AI.cmd。
+
+重要：不要让 Mac 和 Windows 同时开启自动发送或自动点赞。
+完整说明：docs\WINDOWS.md

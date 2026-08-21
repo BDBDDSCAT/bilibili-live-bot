@@ -82,7 +82,11 @@ function main() {
   console.log("");
   console.log("下一步：");
   console.log("  npm start                     启动主播工作台（http://127.0.0.1:4322）");
-  console.log("  npm run service:install       安装为常驻服务（开机自启+崩溃自动重启）");
+  if (process.platform === "darwin") {
+    console.log("  npm run service:install       安装为 macOS 常驻服务（开机自启+崩溃自动重启）");
+  } else if (process.platform === "win32") {
+    console.log("  WINDOWS-2-START.cmd           启动 Windows 主播工作台");
+  }
 }
 
 main();

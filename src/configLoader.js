@@ -294,17 +294,38 @@ const DEFAULT_CONFIG = {
   timers: [],
 };
 
-const CHROME_CANDIDATES = [
+const MAC_CHROME_CANDIDATES = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
+];
+const LINUX_CHROME_CANDIDATES = [
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
   "/usr/bin/microsoft-edge",
 ];
+
+function chromeCandidates(env = process.env, platform = process.platform) {
+  const fromEnv = (name, ...parts) => {
+    const base = String(env?.[name] || "").trim();
+    return base ? path.join(base, ...parts) : "";
+  };
+  const windows = [
+    fromEnv("PROGRAMFILES", "Google", "Chrome", "Application", "chrome.exe"),
+    fromEnv("PROGRAMFILES(X86)", "Google", "Chrome", "Application", "chrome.exe"),
+    fromEnv("LOCALAPPDATA", "Google", "Chrome", "Application", "chrome.exe"),
+    fromEnv("PROGRAMFILES", "Microsoft", "Edge", "Application", "msedge.exe"),
+    fromEnv("PROGRAMFILES(X86)", "Microsoft", "Edge", "Application", "msedge.exe"),
+    fromEnv("LOCALAPPDATA", "Microsoft", "Edge", "Application", "msedge.exe"),
+  ].filter(Boolean);
+  if (platform === "win32") return windows;
+  if (platform === "darwin") return MAC_CHROME_CANDIDATES;
+  if (platform === "linux") return LINUX_CHROME_CANDIDATES;
+  return [...MAC_CHROME_CANDIDATES, ...LINUX_CHROME_CANDIDATES, ...windows];
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -329,8 +350,9 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function detectChromeExecutable(preferred = "") {
-  const candidates = preferred ? [preferred, ...CHROME_CANDIDATES] : CHROME_CANDIDATES;
+function detectChromeExecutable(preferred = "", options = {}) {
+  const defaults = chromeCandidates(options.env || process.env, options.platform || process.platform);
+  const candidates = preferred ? [preferred, ...defaults] : defaults;
   for (const candidate of candidates) {
     try {
       if (candidate && fs.existsSync(candidate)) return candidate;
@@ -481,6 +503,7 @@ function loadConfig({ configPath = "", rootDir, logger = null } = {}) {
 
 module.exports = {
   DEFAULT_CONFIG,
+  chromeCandidates,
   deepMerge,
   detectChromeExecutable,
   loadConfig,

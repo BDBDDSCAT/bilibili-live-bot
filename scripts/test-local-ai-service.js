@@ -91,6 +91,40 @@ test("Ollama 不可达时 macOS 无 shell 启动并轮询到 ready", async () =>
   });
 });
 
+test("Ollama 不可达时 Windows 用后台 serve 启动并轮询到 ready", async () => {
+  let fetchCount = 0;
+  const spawnCalls = [];
+  const child = { on: () => child, unref: () => {} };
+  const service = new LocalAiService(enabledConfig(), {
+    fetch: async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) throw new Error("ECONNREFUSED");
+      return jsonResponse({ models: [{ model: "qwen3.5:4b" }] });
+    },
+    spawn: (...args) => {
+      spawnCalls.push(args);
+      return child;
+    },
+    platform: "win32",
+    now: () => 2000,
+    sleep: async () => {},
+  });
+
+  const state = await service.ensureReady();
+
+  assert.strictEqual(state.status, "ready");
+  assert.strictEqual(fetchCount, 2);
+  assert.strictEqual(spawnCalls.length, 1);
+  assert.match(spawnCalls[0][0], /ollama(?:\.exe)?$/i);
+  assert.deepStrictEqual(spawnCalls[0][1], ["serve"]);
+  assert.deepStrictEqual(spawnCalls[0][2], {
+    stdio: "ignore",
+    detached: true,
+    windowsHide: true,
+    shell: false,
+  });
+});
+
 test("Ollama 在线但配置模型缺失时清晰报错且不启动、不 pull", async () => {
   let spawnCount = 0;
   const service = new LocalAiService(enabledConfig(), {
