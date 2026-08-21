@@ -258,7 +258,9 @@ test("BrowserController uses one persistent fake Chrome profile and sends conser
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   );
   assert.equal("channel" in launches[0].launchOptions, false);
-  assert.equal(fs.statSync(launches[0].profileDir).mode & 0o777, 0o700);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(launches[0].profileDir).mode & 0o777, 0o700);
+  }
 
   const page = contexts[0].pages()[0];
   assert.equal(contexts[0].newPageCount, 0, "ready room must not open a login page");

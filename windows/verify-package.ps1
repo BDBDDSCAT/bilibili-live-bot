@@ -95,6 +95,17 @@ foreach ($item in Get-ChildItem -LiteralPath $root -File -Recurse -Force) {
   }
 }
 
+function Get-Sha256([string]$Path) {
+  $stream = [System.IO.File]::OpenRead($Path)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+    $stream.Dispose()
+  }
+}
+
 if ($actual.Count -ne $listed.Count) {
   Write-Host "Package file count differs from manifest: listed $($listed.Count), actual $($actual.Count)"
   $failed += 1
@@ -107,7 +118,7 @@ foreach ($relative in $listed.Keys) {
     $failed += 1
     continue
   }
-  $hash = (Get-FileHash -LiteralPath $actual[$relative] -Algorithm SHA256).Hash.ToLowerInvariant()
+  $hash = Get-Sha256 $actual[$relative]
   if ($hash -ne $listed[$relative]) {
     Write-Host "Hash mismatch: $relative"
     $failed += 1
