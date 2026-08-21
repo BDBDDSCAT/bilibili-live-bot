@@ -1,6 +1,8 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -58,6 +60,22 @@ function hasConfiguredModel(names = [], configuredModel = "") {
   if (names.includes(wanted)) return true;
   // Ollama 对未显式写 tag 的名称默认使用 latest。
   return !wanted.includes(":") && names.includes(`${wanted}:latest`);
+}
+
+function windowsOllamaExecutable(env = process.env) {
+  const candidates = [
+    env?.LOCALAPPDATA
+      ? path.join(env.LOCALAPPDATA, "Programs", "Ollama", "ollama.exe")
+      : "",
+    env?.PROGRAMFILES ? path.join(env.PROGRAMFILES, "Ollama", "ollama.exe") : "",
+  ].filter(Boolean);
+  return candidates.find((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch {
+      return false;
+    }
+  }) || "ollama.exe";
 }
 
 class LocalAiService {
@@ -149,8 +167,8 @@ class LocalAiService {
     if (this.options.autoStart !== true) {
       return this.setState("error", "Ollama 不可达，自动启动已关闭", generation);
     }
-    if (this.platform !== "darwin") {
-      return this.setState("error", "Ollama 不可达；当前系统不支持自动打开 Ollama 应用", generation);
+    if (!new Set(["darwin", "win32"]).has(this.platform)) {
+      return this.setState("error", "Ollama 不可达；当前系统不支持自动启动 Ollama", generation);
     }
 
     this.setState("checking", "Ollama 未运行，正在自动打开", generation);
@@ -178,11 +196,17 @@ class LocalAiService {
   async launchOllama() {
     let child;
     try {
-      child = this.spawnImpl("open", ["-gj", "-a", "Ollama"], {
-        stdio: "ignore",
-        detached: true,
-        shell: false,
-      });
+      const windows = this.platform === "win32";
+      child = this.spawnImpl(
+        windows ? windowsOllamaExecutable() : "open",
+        windows ? ["serve"] : ["-gj", "-a", "Ollama"],
+        {
+          stdio: "ignore",
+          detached: true,
+          ...(windows ? { windowsHide: true } : {}),
+          shell: false,
+        }
+      );
     } catch (error) {
       throw new Error(`无法打开 Ollama：${error.message || String(error)}`);
     }
@@ -247,3 +271,4 @@ module.exports = LocalAiService;
 module.exports.LocalAiService = LocalAiService;
 module.exports.parseLoopbackEndpoint = parseLoopbackEndpoint;
 module.exports.hasConfiguredModel = hasConfiguredModel;
+module.exports.windowsOllamaExecutable = windowsOllamaExecutable;

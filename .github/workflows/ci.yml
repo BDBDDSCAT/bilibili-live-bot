@@ -24,3 +24,34 @@ jobs:
       - run: npm test
       - run: npm run verify
       - run: npm run public:audit
+
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run verify
+      - name: Verify CMD setup and health check in a Unicode path
+        shell: powershell
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "直播 机器人 portable (ci)"
+          $systemNode = (Get-Command node.exe).Source
+          $systemNodeRoot = Split-Path -Parent $systemNode
+          & node scripts/build-windows-portable.js --target $target --node-runtime $systemNodeRoot
+          if ($LASTEXITCODE -ne 0) { throw "Windows portable builder failed: $LASTEXITCODE" }
+          Push-Location -LiteralPath $target
+          try {
+            & cmd.exe /d /s /c "CALL WINDOWS-4-VERIFY.cmd"
+            if ($LASTEXITCODE -ne 0) { throw "WINDOWS-4-VERIFY.cmd failed: $LASTEXITCODE" }
+            & cmd.exe /d /s /c "CALL WINDOWS-1-SETUP.cmd -SkipTests"
+            if ($LASTEXITCODE -ne 0) { throw "WINDOWS-1-SETUP.cmd failed: $LASTEXITCODE" }
+            & cmd.exe /d /s /c "CALL WINDOWS-2-START.cmd -NoBrowser -ExitAfterHealthy"
+            if ($LASTEXITCODE -ne 0) { throw "WINDOWS-2-START.cmd failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }

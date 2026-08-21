@@ -5,7 +5,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
-const { DEFAULT_CONFIG, deepMerge, loadConfig, validateConfig } = require("../src/configLoader");
+const {
+  DEFAULT_CONFIG,
+  deepMerge,
+  detectChromeExecutable,
+  loadConfig,
+  validateConfig,
+} = require("../src/configLoader");
 
 function makeTempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "bilibot-config-"));
@@ -32,6 +38,36 @@ test("默认配置是安全的：不发送、不点赞、不接管浏览器", ()
   assert.strictEqual(DEFAULT_CONFIG.localAi.startupTimeoutMs, 15000);
   assert.strictEqual(DEFAULT_CONFIG.localAi.proactive.onlyWhenLive, true);
   assert.strictEqual(DEFAULT_CONFIG.room, "");
+});
+
+test("Windows 会从标准安装目录发现 Chrome", () => {
+  const root = makeTempRoot();
+  try {
+    const chrome = path.join(root, "Google", "Chrome", "Application", "chrome.exe");
+    fs.mkdirSync(path.dirname(chrome), { recursive: true });
+    fs.writeFileSync(chrome, "fixture");
+    assert.strictEqual(
+      detectChromeExecutable("", { env: { PROGRAMFILES: root }, platform: "win32" }),
+      chrome
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows 只安装 Edge 时也能找到可托管浏览器", () => {
+  const root = makeTempRoot();
+  try {
+    const edge = path.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
+    fs.mkdirSync(path.dirname(edge), { recursive: true });
+    fs.writeFileSync(edge, "fixture");
+    assert.strictEqual(
+      detectChromeExecutable("", { env: { PROGRAMFILES: root }, platform: "win32" }),
+      edge
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("公开配置模板默认不启用普通固定话术", () => {

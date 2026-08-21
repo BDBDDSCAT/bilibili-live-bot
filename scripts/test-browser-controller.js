@@ -183,6 +183,39 @@ class FakeContext extends EventEmitter {
   }
 }
 
+test("BrowserController detects an installed Windows browser when safe config leaves the path blank", async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-browser-detect-"));
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+
+  const launches = [];
+  const detected = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+  const controller = new BrowserController({
+    rootDir,
+    config: {
+      room: "https://live.bilibili.com/20002",
+      browserAutomation: {
+        enabled: false,
+        roomUrl: ROOM_URL,
+        profileDir: "state/browser-profile",
+        chromeExecutable: "",
+        loginPollMs: 60000,
+      },
+    },
+    detectChromeExecutable: () => detected,
+    launch: async (profileDir, launchOptions) => {
+      launches.push({ profileDir, launchOptions });
+      return new FakeContext([new FakePage()]);
+    },
+  });
+
+  const started = await controller.start({ room: ROOM_URL });
+  assert.equal(started.ready, true);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].launchOptions.executablePath, detected);
+  assert.equal("channel" in launches[0].launchOptions, false);
+  await controller.stop("Windows browser detection test stop");
+});
+
 test("BrowserController uses one persistent fake Chrome profile and sends conservatively", async (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-browser-controller-"));
   t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));

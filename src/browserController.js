@@ -3,6 +3,7 @@
 const EventEmitter = require("node:events");
 const fs = require("node:fs");
 const path = require("node:path");
+const { detectChromeExecutable } = require("./configLoader");
 
 const DEFAULT_PROFILE_DIR = path.resolve(__dirname, "../state/browser-profile");
 const CHAT_INPUT_SELECTOR = "textarea.chat-input";
@@ -220,6 +221,7 @@ class BrowserController extends EventEmitter {
       ? path.normalize(configuredProfileDir)
       : path.resolve(this.rootDir, configuredProfileDir);
     this.executablePath = String(options.executablePath || browserConfig.chromeExecutable || "");
+    this.detectChromeExecutable = options.detectChromeExecutable || detectChromeExecutable;
     this.headless = options.headless ?? browserConfig.headless === true;
     // statusPollMs is the accurate name for the overall status poll interval;
     // loginPollMs stays accepted for existing configs.
@@ -504,6 +506,9 @@ class BrowserController extends EventEmitter {
         throw new Error("playwright-core chromium.launchPersistentContext is unavailable");
       }
 
+      if (!this.executablePath && typeof this.detectChromeExecutable === "function") {
+        this.executablePath = String(this.detectChromeExecutable() || "").trim();
+      }
       const launchOptions = {
         ...(this.executablePath ? { executablePath: this.executablePath } : { channel: "chrome" }),
         viewport: null,

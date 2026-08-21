@@ -5,6 +5,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { chromium } = require("playwright-core");
 const { PNG } = require("pngjs");
+const { detectChromeExecutable } = require("./configLoader");
 
 const OUTPUT_FILES = {
   png: "gift-static-latest.png",
@@ -99,10 +100,8 @@ function commandOutput(command, args, options = {}) {
 
 function resolveChromeExecutable(preferred = "") {
   const candidates = [
-    preferred,
+    detectChromeExecutable(preferred),
     typeof chromium.executablePath === "function" ? chromium.executablePath() : "",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
