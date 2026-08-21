@@ -284,7 +284,7 @@ class ScreenshotService {
             return {
               ...file,
               fileName: path.basename(filePath),
-              relativePath: path.relative(this.dir, filePath),
+              relativePath: path.relative(this.dir, filePath).split(path.sep).join("/"),
               exists: filePath ? fs.existsSync(filePath) : false,
               size: filePath && fs.existsSync(filePath) ? fs.statSync(filePath).size : Number(file.size || 0),
             };
