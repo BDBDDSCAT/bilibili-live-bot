@@ -103,4 +103,4 @@ npm run public:export -- --target ../bilibili-live-bot-public
 
 ## 贡献与许可
 
-贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。项目使用 [MIT License](LICENSE)。Bilibili、Ollama 和 Qwen 是其各自权利人的商标或项目，本仓库与这些平台没有官方从属关系。
+改进目标与验收条件见 [docs/GOALS.md](docs/GOALS.md)。贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。项目使用 [MIT License](LICENSE)。Bilibili、Ollama 和 Qwen 是其各自权利人的商标或项目，本仓库与这些平台没有官方从属关系。

@@ -169,7 +169,8 @@ async function resolveRoom(roomInput) {
     });
     const detail = info.data?.by_room_ids?.[String(roomId)];
     if (detail) {
-      room.liveStatus = Number(detail.live_status || room.liveStatus);
+      // 0 是明确的下播状态；只有缺失状态时才沿用初始化接口的值。
+      room.liveStatus = Number(detail.live_status ?? room.liveStatus);
       room.title = detail.title || "";
       room.uname = detail.uname || "";
       room.areaName = detail.area_name || "";
