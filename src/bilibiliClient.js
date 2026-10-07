@@ -2063,6 +2063,7 @@ class BilibiliLiveClient extends EventEmitter {
     this.identityMaxEntries = Number(options.identityMaxEntries || 0) || 50000;
     this.ws = null;
     this.stopped = false;
+    this.lifecycleGeneration = 0;
     this.heartbeatTimer = null;
     this.reconnectTimer = null;
     this.hostIndex = Number(options.hostIndex || 0);
@@ -2078,28 +2079,42 @@ class BilibiliLiveClient extends EventEmitter {
   }
 
   async start() {
+    // 每次启动独占一个代次；停止或再次启动后，旧请求不得再写回状态。
+    const generation = this.lifecycleGeneration + 1;
+    this.stop();
+    if (generation !== this.lifecycleGeneration) return;
     this.stopped = false;
-    const room = await resolveRoom(this.roomInput);
-    if (this.stopped) return;
-    this.room = room;
-    this.rememberIdentity({
-      uid: this.room.uid,
-      userName: this.room.uname,
-      face: this.room.face,
-    });
-
+    const active = () => !this.stopped && generation === this.lifecycleGeneration;
+    let room;
     try {
-      this.danmu = await getDanmuConf(this.room.roomId, {
+      room = await resolveRoom(this.roomInput);
+    } catch (error) {
+      if (!active()) return;
+      throw error;
+    }
+    if (!active()) return;
+
+    let danmu;
+    try {
+      danmu = await getDanmuConf(room.roomId, {
         cookie: this.cookie,
       });
     } catch (error) {
-      this.danmu = {
+      if (!active()) return;
+      danmu = {
         token: "",
         hosts: FALLBACK_HOSTS,
         warning: error.message,
       };
     }
-    if (this.stopped) return;
+    if (!active()) return;
+    this.room = room;
+    this.danmu = danmu;
+    this.rememberIdentity({
+      uid: room.uid,
+      userName: room.uname,
+      face: room.face,
+    });
 
     this.emit("room", {
       ...this.room,
@@ -2107,10 +2122,11 @@ class BilibiliLiveClient extends EventEmitter {
       danmuWarning: this.danmu.warning || "",
       hosts: this.danmu.hosts,
     });
-    this.openSocket();
+    if (active()) this.openSocket();
   }
 
   stop() {
+    this.lifecycleGeneration += 1;
     this.stopped = true;
     clearInterval(this.heartbeatTimer);
     clearTimeout(this.reconnectTimer);
@@ -2120,11 +2136,6 @@ class BilibiliLiveClient extends EventEmitter {
     const ws = this.ws;
     this.ws = null;
     if (ws) {
-      try {
-        ws.close();
-      } catch {
-        // Ignore close races.
-      }
       // 对端不应答 close 握手时 socket 会挂 ~30 秒拖住进程退出，兜底强制断开。
       const closeGuard = setTimeout(() => {
         try {
@@ -2135,11 +2146,20 @@ class BilibiliLiveClient extends EventEmitter {
       }, 3000);
       closeGuard.unref?.();
       ws.once?.("close", () => clearTimeout(closeGuard));
+      try {
+        ws.close();
+      } catch {
+        // Ignore close races; the guard still terminates this socket.
+      }
     }
   }
 
   openSocket() {
     if (this.stopped) return;
+    clearInterval(this.heartbeatTimer);
+    clearTimeout(this.reconnectTimer);
+    this.heartbeatTimer = null;
+    this.reconnectTimer = null;
     if (this.ws) {
       // 防御双 start：替换前掐断旧连接，避免孤儿 socket 常驻
       const previous = this.ws;
@@ -2150,8 +2170,10 @@ class BilibiliLiveClient extends EventEmitter {
         // Ignore terminate races.
       }
     }
+    const generation = this.lifecycleGeneration;
     const endpoint = chooseEndpoint(this.danmu?.hosts, this.hostIndex);
     this.emit("connecting", { endpoint });
+    if (this.stopped || generation !== this.lifecycleGeneration) return;
 
     const headers = {
       ...DEFAULT_HEADERS,
@@ -2178,6 +2200,7 @@ class BilibiliLiveClient extends EventEmitter {
       this.reconnectAttempts = 0;
       this.lastPacketAt = Date.now();
       this.emit("connected", { endpoint });
+      if (this.stopped || ws !== this.ws || generation !== this.lifecycleGeneration) return;
       this.sendAuth();
       this.sendHeartbeat();
       this.heartbeatTimer = setInterval(() => {
@@ -2211,6 +2234,7 @@ class BilibiliLiveClient extends EventEmitter {
     });
 
     ws.on("error", (error) => {
+      if (this.stopped || ws !== this.ws) return;
       this.emit("warn", {
         message: "WebSocket 连接错误",
         error,
@@ -2233,7 +2257,11 @@ class BilibiliLiveClient extends EventEmitter {
         reason: Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || ""),
       });
 
-      if (isCurrent && !this.stopped && this.reconnect) {
+      // closed 的订阅者可能已经重新启动或替换连接，旧关闭事件不得再调度重连。
+      if (
+        isCurrent && !this.stopped && generation === this.lifecycleGeneration &&
+        !this.ws && this.reconnect
+      ) {
         this.scheduleReconnect();
       }
     });
@@ -2273,6 +2301,9 @@ class BilibiliLiveClient extends EventEmitter {
   }
 
   scheduleReconnect() {
+    if (this.stopped) return;
+    const generation = this.lifecycleGeneration;
+    const active = () => !this.stopped && generation === this.lifecycleGeneration;
     clearTimeout(this.reconnectTimer);
     this.hostIndex += 1;
     this.reconnectAttempts += 1;
@@ -2285,28 +2316,33 @@ class BilibiliLiveClient extends EventEmitter {
       this.needConfRefresh ||
       (this.reconnectAttempts > 0 && this.reconnectAttempts % CONF_REFRESH_EVERY_ATTEMPTS === 0);
     this.emit("reconnecting", { delayMs: delay, refreshConf: shouldRefresh });
+    if (!active()) return;
     this.reconnectTimer = setTimeout(() => {
-      if (this.stopped) return;
+      this.reconnectTimer = null;
+      if (!active()) return;
       if (!shouldRefresh) {
         this.openSocket();
         return;
       }
-      this.refreshDanmuConf().then(() => {
-        if (!this.stopped) this.openSocket();
+      this.refreshDanmuConf(generation).then(() => {
+        if (active()) this.openSocket();
       });
     }, delay);
   }
 
-  async refreshDanmuConf() {
+  async refreshDanmuConf(generation = this.lifecycleGeneration) {
+    const active = () => !this.stopped && generation === this.lifecycleGeneration;
+    if (!active()) return;
     try {
       const danmu = await getDanmuConf(this.room.roomId, {
         cookie: this.cookie,
       });
-      if (danmu && (danmu.token || danmu.hosts?.length)) {
+      if (active() && danmu && (danmu.token || danmu.hosts?.length)) {
         this.danmu = danmu;
         this.needConfRefresh = false;
       }
     } catch (error) {
+      if (!active()) return;
       this.emit("warn", {
         message: `刷新弹幕服务器配置失败: ${error.message}`,
         error,
